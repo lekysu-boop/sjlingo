@@ -17,6 +17,8 @@ export default function LoginPage() {
   const [registering, setRegistering] = useState(false);
   const [name, setName] = useState('');
 
+
+  const aaa = 1;
   // 로그인하면 세션에 사용자 기록 후 홈으로 이동
   function enter(id: string) {
     login(id);
