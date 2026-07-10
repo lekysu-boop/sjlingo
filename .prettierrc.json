@@ -1,0 +1,7 @@
+{
+  "$comment": "Prettier = 코드 자동 포매터 (들여쓰기·따옴표·줄바꿈 통일). 여러 명이 짜도 스타일이 같아집니다.",
+  "semi": true,
+  "singleQuote": true,
+  "printWidth": 100,
+  "trailingComma": "es5"
+}

@@ -1,0 +1,4 @@
+{
+  "$comment": "ESLint = 코드 문법·품질 검사기 (Java 의 Checkstyle/SonarLint 비슷). next lint 가 이 설정을 읽습니다.",
+  "extends": ["next/core-web-vitals", "prettier"]
+}

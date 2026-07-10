@@ -1,0 +1,56 @@
+# ============================================================================
+#  GitHub Actions — CI (지속적 통합)
+# ----------------------------------------------------------------------------
+#  [이 파일이 하는 일]
+#  코드를 GitHub 에 push 하거나 Pull Request 를 올릴 때마다, GitHub 가
+#  자동으로 "빌드가 되는지 / 문법 오류(lint)는 없는지 / 타입 오류는 없는지"를
+#  검사합니다. Jenkins 파이프라인의 "빌드 검증" 단계와 같은 역할입니다.
+#
+#  [CI 와 CD 의 분담]
+#   - CI (이 파일)      : 코드가 정상인지 자동 검사 (여기 GitHub Actions)
+#   - CD (배포)         : 실제 서비스 반영 → Vercel 이 자동 담당 (별도 설정 불필요)
+#  즉 "검사는 GitHub Actions, 배포는 Vercel"로 역할이 나뉩니다.
+#
+#  파일 위치 규칙: 반드시 .github/workflows/ 아래에 두어야 GitHub 가 인식합니다.
+# ============================================================================
+name: CI
+
+# 언제 실행할지: main 브랜치로의 push, 그리고 모든 Pull Request 때.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest      # 검사를 돌릴 가상 머신(리눅스). GitHub 가 무료 제공.
+    defaults:
+      run:
+        working-directory: nextjs   # 명령을 nextjs 폴더에서 실행 (모노레포 구조라서)
+    steps:
+      # 1) 저장소 코드를 가상 머신으로 내려받기
+      - uses: actions/checkout@v4
+
+      # 2) Node.js 설치 (+ npm 캐시로 설치 속도 향상)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: nextjs/package-lock.json
+
+      # 3) 의존성 설치. npm ci 는 package-lock 기준의 "정확 재현" 설치(CI 전용).
+      - run: npm ci
+
+      # 4) 문법/코드 스타일 검사 (ESLint)
+      - run: npm run lint
+
+      # 5) 타입 검사 (TypeScript). 실제 배포 전에 타입 오류를 먼저 잡음.
+      - run: npm run typecheck
+
+      # 6) 프로덕션 빌드가 실제로 성공하는지 확인
+      #    (빌드에 필요한 환경변수는 더미 값 주입 — 실제 키는 Vercel 에만 둠)
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: dummy-anon-key
+          SUPABASE_SERVICE_ROLE_KEY: dummy-service-role-key

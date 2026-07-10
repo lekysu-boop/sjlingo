@@ -1,0 +1,17 @@
+# 의존성 (mvn 의 .m2 처럼 용량이 크고 재생성 가능 → 올리지 않음)
+node_modules/
+
+# Next.js 빌드 결과물
+.next/
+out/
+build/
+
+# 환경변수 (접속 키·비밀번호! 절대 커밋 금지)
+.env
+.env.local
+.env*.local
+
+# 로그·OS 파일
+*.log
+.DS_Store
+npm-debug.log*

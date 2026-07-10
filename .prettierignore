@@ -1,0 +1,6 @@
+# Prettier 포매팅에서 제외할 대상 (빌드 결과물·의존성 등)
+node_modules/
+.next/
+out/
+build/
+*.md

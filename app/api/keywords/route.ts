@@ -1,0 +1,65 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { dedupeKeywords } from '@/lib/dedupe';
+import type { KeywordInput } from '@/lib/types';
+
+export const runtime = 'nodejs';
+
+// GET /api/keywords?userId=&subjectId= — 키워드 목록
+export async function GET(req: NextRequest) {
+  const userId = req.nextUrl.searchParams.get('userId');
+  const subjectId = req.nextUrl.searchParams.get('subjectId');
+  if (!userId || !subjectId)
+    return NextResponse.json({ error: 'userId, subjectId 필요' }, { status: 400 });
+
+  const db = createAdminClient();
+  const { data, error } = await db
+    .from('keywords')
+    .select('*')
+    .eq('owner_id', userId)
+    .eq('subject_id', subjectId)
+    .order('created_at', { ascending: true });
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json(data);
+}
+
+// POST /api/keywords — 단건 또는 대량 추가 (중복 스킵)
+// body: { userId, subjectId, items: KeywordInput[] }
+export async function POST(req: NextRequest) {
+  const body = await req.json();
+  const { userId, subjectId } = body;
+  const items: KeywordInput[] = Array.isArray(body.items) ? body.items : [body.item];
+  if (!userId || !subjectId || !items?.length)
+    return NextResponse.json({ error: 'userId, subjectId, items 필요' }, { status: 400 });
+
+  const db = createAdminClient();
+
+  // 기존 목록을 읽어 중복 판정 (공백/슬래시 무시한 암기코드 비교)
+  const { data: existing } = await db
+    .from('keywords')
+    .select('code')
+    .eq('owner_id', userId)
+    .eq('subject_id', subjectId);
+
+  const clean = items
+    .filter((it) => (it.code || '').trim() && (it.concept || '').trim())
+    .map((it) => ({
+      era: (it.era || '').trim() || '기타',
+      code: it.code.trim(),
+      concept: it.concept.trim(),
+      principle: (it.principle || '').trim(),
+      day: (it.day || '').trim(),
+    }));
+
+  const { toInsert, added, skipped } = dedupeKeywords(existing || [], clean);
+
+  if (toInsert.length) {
+    const rows = toInsert.map((it) => ({ ...it, owner_id: userId, subject_id: subjectId }));
+    // unique index가 있으므로 혹시 남은 충돌은 무시하고 통과
+    const { error } = await db.from('keywords').insert(rows);
+    if (error && !`${error.message}`.includes('duplicate'))
+      return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ added, skipped });
+}
