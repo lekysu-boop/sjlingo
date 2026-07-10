@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 
 export const runtime = 'nodejs';
+// Supabase(내부적으로 fetch 사용) 응답을 Next.js가 자동 캐싱하지 않도록 강제.
+// 이게 없으면 같은 조회가 예전 결과로 고정되어, DB가 바뀌어도 화면에 반영되지 않는다.
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 // GET /api/subjects?userId=... — 사용자의 과목 목록
 export async function GET(req: NextRequest) {

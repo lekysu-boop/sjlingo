@@ -28,7 +28,10 @@ export default function LoginPage() {
   useEffect(() => {
     users.forEach(async (u) => {
       if (!progress[u.id]) {
-        try { setProgress((p) => ({ ...p, [u.id]: await getProgress(u.id) })); } catch {}
+        try {
+          const p = await getProgress(u.id);
+          setProgress((prev) => ({ ...prev, [u.id]: p }));
+        } catch {}
       }
     });
   }, [users]); // eslint-disable-line
@@ -61,7 +64,10 @@ export default function LoginPage() {
                   키워드 {p.kwRate}% · 기출 {p.exRate}%
                 </span>}
               </button>
-              <button onClick={async () => setProgress((s) => ({ ...s, [u.id]: { ...(s[u.id]!), cheers: (await sendCheer(u.id)).cheers } }))} style={cheerBtn}>
+              <button onClick={async () => {
+                const r = await sendCheer(u.id);
+                setProgress((s) => ({ ...s, [u.id]: { ...(s[u.id]!), cheers: r.cheers } }));
+              }} style={cheerBtn}>
                 👏 {p?.cheers ?? 0}
               </button>
             </div>

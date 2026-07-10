@@ -20,7 +20,10 @@ export default function StatsPage() {
   useEffect(() => {
     users.forEach(async (u) => {
       if (!progress[u.id]) {
-        try { setProgress((p) => ({ ...p, [u.id]: await getProgress(u.id) })); } catch {}
+        try {
+          const p = await getProgress(u.id);
+          setProgress((prev) => ({ ...prev, [u.id]: p }));
+        } catch {}
       }
     });
     if (!selected && userId) setSelected(userId);

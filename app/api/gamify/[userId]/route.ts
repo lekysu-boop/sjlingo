@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { unstable_noStore as noStore } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { MAX_HEARTS, regenHearts, nextHeartInMin, todayStr } from '@/lib/gamify';
 import type { GamifyState } from '@/lib/types';
 
 export const runtime = 'nodejs';
+// Supabase(내부적으로 fetch 사용) 응답을 Next.js가 자동 캐싱하지 않도록 강제.
+// 이게 없으면 같은 조회가 예전 결과로 고정되어, DB가 바뀌어도 화면에 반영되지 않는다.
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 // gamify_state 행을 읽고 없으면 생성. 하트 회복·오늘 XP 리셋을 반영해 저장.
 async function loadState(db: ReturnType<typeof createAdminClient>, userId: string) {
@@ -37,6 +42,9 @@ function toState(d: any): GamifyState {
 
 // GET /api/gamify/:userId — 현재 게이미피케이션 상태
 export async function GET(_req: NextRequest, { params }: { params: { userId: string } }) {
+  // 요청 객체를 읽지 않고 동적 경로 파라미터만 쓰는 라우트라, dynamic 설정만으로는
+  // 캐시를 안 타는 경우가 있어 noStore()로 확실히 막는다.
+  noStore();
   const db = createAdminClient();
   const d = await loadState(db, params.userId);
   return NextResponse.json(toState(d));

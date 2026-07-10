@@ -15,11 +15,16 @@
 
 // import 는 Java 의 import 와 같습니다. { } 로 특정 항목만 골라 가져옵니다.
 import { NextRequest, NextResponse } from 'next/server';
+import { unstable_noStore as noStore } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin'; // '@/' 는 프로젝트 최상위 폴더
 
 // 이 API 는 Node.js 런타임(서버)에서 실행하라는 선언입니다.
 // (Next.js 에는 더 가벼운 'edge' 런타임도 있지만, DB 라이브러리 호환을 위해 nodejs 사용)
 export const runtime = 'nodejs';
+// Supabase(내부적으로 fetch 사용) 응답을 Next.js가 자동 캐싱하지 않도록 강제.
+// 이게 없으면 같은 조회가 예전 결과로 고정되어, DB가 바뀌어도 화면에 반영되지 않는다.
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 // ----------------------------------------------------------------------------
 //  GET /api/users  —  로그인 화면에 뿌릴 사용자 목록
@@ -29,6 +34,9 @@ export const runtime = 'nodejs';
 //    스레드를 막지 않는 방식입니다. await 앞에 붙은 작업이 끝날 때까지
 //    "기다렸다가" 다음 줄로 넘어갑니다. (Future.get() 과 비슷하지만 문법이 간결)
 export async function GET() {
+  // 요청 객체를 전혀 받지 않는 라우트라, dynamic 설정만으로는 캐시를 안 타는 경우가 있어
+  // noStore()로 확실히 막는다.
+  noStore();
   const db = createAdminClient(); // DB 접속 핸들 얻기 (JDBC 의 Connection 과 유사)
 
   // Supabase 쿼리 빌더. 아래 한 줄은 SQL 로:

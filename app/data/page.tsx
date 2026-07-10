@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from '@/hooks/useSession';
 import { useKeywords } from '@/hooks/useKeywords';
@@ -26,8 +26,14 @@ export default function DataPage() {
   const [kwEdit, setKwEdit] = useState<KwEdit | null>(null);
   const [exEdit, setExEdit] = useState<ExEdit | null>(null);
   const [warn, setWarn] = useState<string | null>(null);
+  const PAGE_SIZE = 20;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const sentinelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { if (userId === null) router.replace('/'); }, [userId, router]);
+
+  // 탭을 바꾸면 스크롤 위치도 목록도 처음(20개)부터 다시 보여준다.
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [tab]);
 
   const accent = tab === 'kw' ? '#2563eb' : '#7c3aed';
   const tint = tab === 'kw' ? '#eff6ff' : '#f3e8ff';
@@ -109,6 +115,17 @@ export default function DataPage() {
 
   const list = tab === 'kw' ? kw.items : ex.items;
 
+  // 목록 끝의 sentinel 이 화면에 보이면 20개씩 더 불러온다 (무한 스크롤).
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) setVisibleCount((v) => Math.min(v + PAGE_SIZE, list.length));
+    }, { rootMargin: '200px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [list.length]);
+
   return (
     <div style={wrap}><div style={phone}>
       <div style={{ marginBottom: 12 }}>
@@ -132,15 +149,18 @@ export default function DataPage() {
         {msg && <div style={{ marginTop: 10, fontSize: 12.5, fontWeight: 700, color: msg.ok ? '#16a34a' : '#dc2626', background: msg.ok ? '#dcfce7' : '#fef2f2', padding: '10px 12px', borderRadius: 11, lineHeight: 1.45 }}>{msg.text}</div>}
       </div>
 
-      <div style={{ fontSize: 13, fontWeight: 800, color: '#94a3b8', marginBottom: 10 }}>등록된 항목 {list.length}개</div>
+      <div style={{ fontSize: 13, fontWeight: 800, color: '#94a3b8', marginBottom: 10 }}>등록된 항목 {list.length}개{list.length > visibleCount ? ` · ${visibleCount}개 표시 중` : ''}</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {list.length === 0 && <div style={{ textAlign: 'center', color: '#94a3b8', fontWeight: 700, fontSize: 13, padding: '24px 0' }}>아직 등록된 항목이 없어요. '기본데이터'나 '＋ 직접 추가'로 시작하세요.</div>}
-        {tab === 'kw' && kw.items.map((k) => (
+        {tab === 'kw' && kw.items.slice(0, visibleCount).map((k) => (
           <Row key={k.id} accent={accent} tint={tint} era={k.era} title={k.code} sub={k.concept} onEdit={() => openEditKw(k)} onDelete={() => remove(k.id)} />
         ))}
-        {tab === 'ex' && ex.items.map((q) => (
+        {tab === 'ex' && ex.items.slice(0, visibleCount).map((q) => (
           <Row key={q.id} accent={accent} tint={tint} era={q.era} title={q.question} sub={'정답: ' + (q.options[q.answer] ?? '')} onEdit={() => openEditEx(q)} onDelete={() => remove(q.id)} />
         ))}
+        {visibleCount < list.length && (
+          <div ref={sentinelRef} style={{ textAlign: 'center', color: '#94a3b8', fontWeight: 700, fontSize: 12, padding: '10px 0' }}>불러오는 중…</div>
+        )}
       </div>
 
       <nav style={tabbar}>

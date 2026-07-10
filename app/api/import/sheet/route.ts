@@ -45,6 +45,19 @@ function colIdx(header: string[], keys: string[]): number {
   });
 }
 
+// 시트 맨 위에 제목·안내문 등 머리말 행이 섞여 있을 수 있어서,
+// 실제 열 이름이 있는 행을 앞쪽 몇 줄에서 찾아낸다 (없으면 1행으로 가정).
+// 설명 문구 한 칸에 "암기코드" 같은 단어가 우연히 섞여 오탐하는 것을 막기 위해,
+// 서로 다른 열 2개 이상이 각각 별개의 칸에서 매칭되는 행만 헤더로 인정한다.
+function findHeaderRow(rows: string[][], keyGroups: string[][]): number {
+  const limit = Math.min(rows.length, 10);
+  for (let i = 0; i < limit; i++) {
+    const idxs = keyGroups.map((keys) => colIdx(rows[i], keys));
+    if (idxs.every((idx) => idx >= 0) && new Set(idxs).size === idxs.length) return i;
+  }
+  return 0;
+}
+
 export async function POST(req: NextRequest) {
   const { userId, subjectId, kind, url } = await req.json();
   if (!userId || !subjectId || !url)
@@ -66,17 +79,21 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const header = rows[0];
   const g = (r: string[], idx: number, d = '') => (idx >= 0 && r[idx] != null ? r[idx].trim() : d);
   const db = createAdminClient();
 
   if (kind === 'keyword') {
+    const headerIdx = findHeaderRow(rows, [
+      ['암기코드', '코드', 'code'],
+      ['핵심개념', '개념', 'concept'],
+    ]);
+    const header = rows[headerIdx];
     const iE = colIdx(header, ['시대', '주제', '분류', 'era']);
     const iC = colIdx(header, ['암기코드', '코드', 'code']);
     const iK = colIdx(header, ['핵심개념', '개념', 'concept']);
     const iP = colIdx(header, ['연상', '기법', '매칭', '원리', '설명', 'principle']);
     const iD = colIdx(header, ['회차', '강의', 'day']);
-    const items = rows.slice(1).map((r) => ({
+    const items = rows.slice(headerIdx + 1).map((r) => ({
       era: g(r, iE >= 0 ? iE : 0, '기타'),
       code: g(r, iC >= 0 ? iC : 1),
       concept: g(r, iK >= 0 ? iK : 2),
@@ -95,6 +112,11 @@ export async function POST(req: NextRequest) {
   }
 
   // kind === 'exam'
+  const headerIdx = findHeaderRow(rows, [
+    ['문제', '질문', 'question'],
+    ['정답', 'answer'],
+  ]);
+  const header = rows[headerIdx];
   const iE = colIdx(header, ['시대', '범위', 'era']);
   const iQ = colIdx(header, ['문제', '질문', 'question']);
   const iA = colIdx(header, ['정답', 'answer']);
@@ -102,7 +124,7 @@ export async function POST(req: NextRequest) {
   const optIdx: number[] = [];
   header.forEach((h, i) => { if (/보기|선택|opt|choice/i.test((h || '').replace(/\s/g, ''))) optIdx.push(i); });
 
-  const items = rows.slice(1).map((r) => {
+  const items = rows.slice(headerIdx + 1).map((r) => {
     const options = (optIdx.length ? optIdx : [2, 3, 4, 5]).map((i) => g(r, i)).filter((x) => x !== '');
     const ansRaw = g(r, iA >= 0 ? iA : 2 + options.length, '1');
     let answer = parseInt(ansRaw);

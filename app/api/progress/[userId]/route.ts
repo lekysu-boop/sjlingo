@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { unstable_noStore as noStore } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { MonthlyStat, UserProgress } from '@/lib/types';
 
 export const runtime = 'nodejs';
+// Supabase(내부적으로 fetch 사용) 응답을 Next.js가 자동 캐싱하지 않도록 강제.
+// 이게 없으면 같은 조회가 예전 결과로 고정되어, DB가 바뀌어도 화면에 반영되지 않는다.
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 // GET /api/progress/:userId — 진도율·월간·응원 집계
 export async function GET(_req: NextRequest, { params }: { params: { userId: string } }) {
+  // 이 라우트는 요청 객체(searchParams 등)를 읽지 않고 동적 경로 파라미터만 쓰기 때문에,
+  // 위 dynamic/fetchCache 설정만으로는 캐시를 안 타는 경우가 있어 noStore()로 확실히 막는다.
+  noStore();
   const userId = params.userId;
   const db = createAdminClient();
 
