@@ -26,7 +26,7 @@ type Phase = 'setup' | 'session' | 'done';
 export default function KeywordStudyPage() {
   const router = useRouter();
   const { userId, subjectId } = useSession();
-  const { items, eras, refresh } = useKeywords(userId, subjectId);
+  const { items, eras } = useKeywords(userId, subjectId);
   const gam = useGamification(userId);
 
   const [phase, setPhase] = useState<Phase>('setup');
@@ -94,7 +94,6 @@ export default function KeywordStudyPage() {
     setEndedByHearts(byHearts);
     setPhase('done');
     gam.completeSession(durationSec / 60).then((r) => setEarnedCoins(r?.gainedCoins ?? 0));
-    refresh();
     bumpQuestSession(userId);
     playFinish();
     // 세션 결과 기록 → 통계(공부시간·가중평균)와 리그 순위의 원천

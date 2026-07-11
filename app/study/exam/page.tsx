@@ -30,7 +30,7 @@ export default function ExamStudyPage() {
   const router = useRouter();
   const { userId, subjectId } = useSession();
   const { current: currentSubject } = useSubjects(userId, subjectId);
-  const { items: examItems, eras: examEras, refresh } = useExams(userId, subjectId);
+  const { items: examItems, eras: examEras } = useExams(userId, subjectId);
   const kw = useKeywords(userId, subjectId);
   const gam = useGamification(userId);
 
@@ -113,7 +113,6 @@ export default function ExamStudyPage() {
     setEndedByHearts(byHearts);
     setPhase('done');
     gam.completeSession(durationSec / 60).then((r) => setEarnedCoins(r?.gainedCoins ?? 0));
-    refresh();
     bumpQuestSession(userId);
     playFinish();
     // 세션 결과 기록 → 통계(공부시간·가중평균)와 리그 순위의 원천
