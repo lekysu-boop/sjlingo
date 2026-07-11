@@ -16,6 +16,8 @@ export default function LoginPage() {
   const [progress, setProgress] = useState<Record<string, UserProgress>>({});
   const [registering, setRegistering] = useState(false);
   const [name, setName] = useState('');
+  const [submitting, setSubmitting] = useState(false); // 중복 클릭으로 같은 이름이 두 번 등록되는 것을 막는 잠금
+  const [dupeConfirm, setDupeConfirm] = useState<string | null>(null); // 중복 이름 확인 대기 중이면 그 이름
   // 로그인하면 세션에 사용자 기록 후 홈으로 이동
   function enter(id: string) {
     login(id);
@@ -35,13 +37,40 @@ export default function LoginPage() {
     });
   }, [users]); // eslint-disable-line
 
+  const normalizeName = (n: string) => n.trim().toLowerCase();
+
+  // 이미 쓰이고 있는 이름이면 "이름 (2)", "이름 (3)"... 처럼 비어 있는 다음 번호를 붙인다.
+  function nextAvailableName(base: string): string {
+    const taken = new Set(users.map((u) => normalizeName(u.name)));
+    if (!taken.has(normalizeName(base))) return base;
+    let i = 2;
+    while (taken.has(normalizeName(`${base} (${i})`))) i++;
+    return `${base} (${i})`;
+  }
+
+  async function doCreate(finalName: string) {
+    if (submitting) return; // 등록 중 중복 클릭으로 같은 이름이 두 번 만들어지는 것을 막는다
+    setSubmitting(true);
+    try {
+      const u = await createUser({ name: finalName, emoji: '🦊', color: '#2563eb' });
+      await refresh();
+      setName('');
+      setRegistering(false);
+      setDupeConfirm(null);
+      login(u.id);
+      setUserId(u.id);
+      router.push('/onboarding'); // 신규 계정은 홈 화면 전에 웰컴 가이드를 한 번 보여준다
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function handleCreate() {
-    if (!name.trim()) return;
-    const u = await createUser({ name: name.trim(), emoji: '🦊', color: '#2563eb' });
-    await refresh();
-    setName('');
-    setRegistering(false);
-    enter(u.id);
+    const trimmed = name.trim();
+    if (!trimmed || submitting) return;
+    const isDuplicate = users.some((u) => normalizeName(u.name) === normalizeName(trimmed));
+    if (isDuplicate) { setDupeConfirm(trimmed); return; }
+    await doCreate(trimmed);
   }
 
   if (loading) return <Centered>불러오는 중…</Centered>;
@@ -89,14 +118,32 @@ export default function LoginPage() {
             <input autoFocus value={name} onChange={(e) => setName(e.target.value)}
               placeholder="이름 (예: 김지호)" style={input} onKeyDown={(e) => e.key === 'Enter' && handleCreate()} />
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setRegistering(false)} style={btnGray}>취소</button>
-              <button onClick={handleCreate} style={{ ...btn, flex: 1 }}>등록하고 시작</button>
+              <button onClick={() => setRegistering(false)} disabled={submitting} style={btnGray}>취소</button>
+              <button onClick={handleCreate} disabled={submitting} style={{ ...btn, flex: 1, opacity: submitting ? .6 : 1 }}>{submitting ? '등록 중…' : '등록하고 시작'}</button>
             </div>
           </div>
         ) : (
           <button onClick={() => setRegistering(true)} style={dashed}>＋ 신규 사용자 등록</button>
         )}
       </div>
+
+      {/* 이미 같은 이름의 사용자가 있을 때만 뜨는 중복 확인 모달 */}
+      {dupeConfirm && (
+        <div onClick={() => !submitting && setDupeConfirm(null)} style={overlay}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 340, background: '#fff', borderRadius: 22, padding: '24px 22px', textAlign: 'center' }}>
+            <div style={{ fontSize: 38 }}>🤔</div>
+            <div style={{ fontSize: 17, fontWeight: 900, color: '#0f172a', margin: '8px 0 6px' }}>이미 있는 이름이에요</div>
+            <div style={{ fontSize: 13, color: '#64748b', fontWeight: 600, lineHeight: 1.6, marginBottom: 18 }}>
+              &lsquo;{dupeConfirm}&rsquo; 이름의 사용자가 이미 있어요.<br />그래도 새 사용자로 등록할까요?<br />
+              <b style={{ color: '#0f172a' }}>&lsquo;{nextAvailableName(dupeConfirm)}&rsquo;</b> 이름으로 등록돼요.
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setDupeConfirm(null)} disabled={submitting} style={{ flex: 1, background: '#eef2f7', color: '#334155', border: 'none', fontWeight: 900, fontSize: 14, padding: 14, borderRadius: 14, cursor: 'pointer' }}>취소</button>
+              <button onClick={() => doCreate(nextAvailableName(dupeConfirm))} disabled={submitting} style={{ flex: 1, background: '#2563eb', color: '#fff', border: 'none', fontWeight: 900, fontSize: 14, padding: 14, borderRadius: 14, cursor: 'pointer', opacity: submitting ? .6 : 1 }}>{submitting ? '등록 중…' : '등록'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </Centered>
   );
 }
@@ -113,3 +160,4 @@ const btnGray: React.CSSProperties = { background: '#eef2f7', color: '#334155', 
 const dashed: React.CSSProperties = { width: '100%', border: '2px dashed #cbd5e1', background: '#fff', color: '#64748b', fontWeight: 800, padding: 16, borderRadius: 18, cursor: 'pointer' };
 const input: React.CSSProperties = { border: '2px solid #e2e8f0', borderRadius: 12, padding: 13, fontSize: 15, fontWeight: 700, outline: 'none', fontFamily: 'inherit' };
 const errorCard: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 12, textAlign: 'center', background: '#fff', borderRadius: 20, padding: 24, boxShadow: '0 14px 32px -20px rgba(15,23,42,.35)' };
+const overlay: React.CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 40, padding: 16 };
