@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { clampImportance } from '@/lib/importance';
 
 export const runtime = 'nodejs';
 
 // PATCH /api/keywords/:id — 키워드 수정
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const body = await req.json();
-  const patch: Record<string, string> = {};
+  const patch: Record<string, string | number> = {};
   for (const k of ['era', 'code', 'concept', 'principle', 'day'] as const) {
     if (typeof body[k] === 'string') patch[k] = body[k].trim();
   }
+  if (body.importance !== undefined) patch.importance = clampImportance(body.importance);
   if (patch.code === '' ) return NextResponse.json({ error: '암기코드는 필수' }, { status: 400 });
 
   const db = createAdminClient();

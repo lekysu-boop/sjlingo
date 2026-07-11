@@ -58,8 +58,9 @@ create table if not exists keywords (
   era         text not null default '기타',   -- 학습범위(시대/주제). 범위 칩은 이 값에서 동적 추출
   code        text not null,                    -- 앞면 암기코드
   concept     text not null default '',         -- 역사적 핵심 개념
-  principle   text not null default '',         -- 연상 기법·매칭 원리
-  day         text not null default '',         -- 회차(선택)
+  principle   text not null default '',         -- 연상법·부가 설명
+  day         text not null default '',         -- 회차/단원(선택)
+  importance  int  not null default 2 check (importance between 1 and 3), -- 중요도 1=하 2=중 3=상
   code_norm   text generated always as (regexp_replace(code, '[[:space:]/]', '', 'g')) stored, -- 중복판정용 정규화
   created_at  timestamptz not null default now()
 );
@@ -77,6 +78,7 @@ create table if not exists exam_questions (
   options     jsonb not null default '[]'::jsonb,  -- ["보기1","보기2",...]
   answer      int  not null default 0,             -- 정답 index (0-based)
   explain     text not null default '',
+  importance  int  not null default 2 check (importance between 1 and 3), -- 중요도 1=하 2=중 3=상
   created_at  timestamptz not null default now()
 );
 create index if not exists idx_exams_scope on exam_questions(owner_id, subject_id);
@@ -109,6 +111,21 @@ create table if not exists keyword_events (
   created_at  timestamptz not null default now()
 );
 create index if not exists idx_kwevents_owner_time on keyword_events(owner_id, created_at);
+
+-- ---------- 학습 세션 기록 (공부시간·가중평균 정답률의 원천) ----------
+-- 한 번의 학습 세션이 끝날 때마다 1행. duration_sec = 실제 문제 푼 시간(초).
+create table if not exists study_sessions (
+  id           uuid primary key default gen_random_uuid(),
+  owner_id     uuid not null references profiles(id) on delete cascade,
+  subject_id   uuid not null references subjects(id) on delete cascade,
+  kind         text not null check (kind in ('kw', 'ex')),  -- kw=키워드, ex=기출
+  total        int  not null default 0,
+  correct      int  not null default 0,
+  duration_sec int  not null default 0,
+  created_at   timestamptz not null default now()
+);
+create index if not exists idx_sessions_owner_time on study_sessions(owner_id, created_at);
+create index if not exists idx_sessions_subject on study_sessions(owner_id, subject_id);
 
 -- ---------- 응원 ----------
 create table if not exists cheers (
@@ -156,6 +173,7 @@ alter table keywords        enable row level security;
 alter table exam_questions  enable row level security;
 alter table keyword_progress enable row level security;
 alter table exam_attempts   enable row level security;
+alter table study_sessions  enable row level security;
 alter table keyword_events  enable row level security;
 alter table cheers          enable row level security;
 alter table gamify_state    enable row level security;

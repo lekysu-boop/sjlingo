@@ -40,23 +40,21 @@ export function useGamification(userId: string | null) {
     } catch {}
   }, [userId]);
 
-  const onWrong = useCallback(async () => {
-    if (!userId) return;
-    try {
-      const r = await apiReward({ userId, correct: false });
-      setState(r.state);
-      fire('wrong');
-    } catch {}
-  }, [userId]);
+  // 오답은 서버 상태를 바꾸지 않는다 (하트는 세션 전용 — 학습 화면이 관리).
+  // 화면 효과(마스코트·흔들림)만 트리거한다.
+  const onWrong = useCallback(() => {
+    fire('wrong');
+  }, []);
 
-  const completeSession = useCallback(async () => {
-    if (!userId) return;
+  // 세션 완료: 스트릭 갱신 + 공부시간 비례 코인 지급 (1분 = 1코인)
+  const completeSession = useCallback(async (durationMin = 0) => {
+    if (!userId) return null;
     try {
-      const r = await apiReward({ userId, correct: false, sessionComplete: true });
-      // 세션 완료는 하트를 깎지 않음(서버에서 sessionComplete 시 하트 유지).
+      const r = await apiReward({ userId, correct: false, sessionComplete: true, durationMin });
       setState(r.state);
       if (r.streakUp) fire('streak', { streak: r.state.streak });
-    } catch {}
+      return r; // 결과 화면에서 획득 코인(r.gainedCoins)을 보여줄 수 있게 반환
+    } catch { return null; }
   }, [userId]);
 
   return { state, fx, refresh, onCorrect, onWrong, completeSession };

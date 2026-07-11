@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { dedupeKeywords } from '@/lib/dedupe';
+import { clampImportance } from '@/lib/importance';
 import type { KeywordInput } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -53,6 +54,7 @@ export async function POST(req: NextRequest) {
       concept: it.concept.trim(),
       principle: (it.principle || '').trim(),
       day: (it.day || '').trim(),
+      importance: clampImportance((it as any).importance),
     }));
 
   const { toInsert, added, skipped } = dedupeKeywords(existing || [], clean);
@@ -60,10 +62,32 @@ export async function POST(req: NextRequest) {
   if (toInsert.length) {
     const rows = toInsert.map((it) => ({ ...it, owner_id: userId, subject_id: subjectId }));
     // unique index가 있으므로 혹시 남은 충돌은 무시하고 통과
-    const { error } = await db.from('keywords').insert(rows);
+    let { error } = await db.from('keywords').insert(rows);
+    // importance 컬럼 마이그레이션 전이면 그 컬럼만 빼고 재시도 (등록이 막히지 않게)
+    if (error && `${error.message}`.includes('importance')) {
+      ({ error } = await db.from('keywords').insert(rows.map((r: any) => { const { importance, ...rest } = r; return rest; })));
+    }
     if (error && !`${error.message}`.includes('duplicate'))
       return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   return NextResponse.json({ added, skipped });
+}
+
+// DELETE /api/keywords?userId=&subjectId= — 해당 과목의 키워드 전체 삭제
+// keyword_progress 등 연관 기록은 FK(on delete cascade)로 함께 정리된다.
+export async function DELETE(req: NextRequest) {
+  const userId = req.nextUrl.searchParams.get('userId');
+  const subjectId = req.nextUrl.searchParams.get('subjectId');
+  if (!userId || !subjectId)
+    return NextResponse.json({ error: 'userId, subjectId 필요' }, { status: 400 });
+
+  const db = createAdminClient();
+  const { error, count } = await db
+    .from('keywords')
+    .delete({ count: 'exact' })
+    .eq('owner_id', userId)
+    .eq('subject_id', subjectId);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ deleted: count ?? 0 });
 }

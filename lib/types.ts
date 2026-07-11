@@ -35,15 +35,16 @@ export interface Keyword {
   owner_id: string;
   subject_id: string;
   era: string;
-  code: string;       // 앞면 암기코드
-  concept: string;    // 역사적 핵심 개념
-  principle: string;  // 연상 기법·매칭 원리
-  day: string;        // 회차(선택)
+  code: string;       // 앞면 키워드
+  concept: string;    // 뜻·핵심 개념
+  principle: string;  // 연상법·부가 설명
+  day: string;        // 회차/단원(선택)
+  importance: number; // 중요도 1=하 2=중 3=상
   created_at?: string;
 }
 
-// 신규 등록/가져오기 시 서버로 보내는 입력형 (id/owner 제외)
-export type KeywordInput = Omit<Keyword, 'id' | 'owner_id' | 'created_at' | 'subject_id'>;
+// 신규 등록/가져오기 시 서버로 보내는 입력형 (id/owner 제외, 중요도는 선택 — 기본 2)
+export type KeywordInput = Omit<Keyword, 'id' | 'owner_id' | 'created_at' | 'subject_id' | 'importance'> & { importance?: number };
 
 export interface ExamQuestion {
   id: string;
@@ -54,10 +55,11 @@ export interface ExamQuestion {
   options: string[];
   answer: number;     // 0-based
   explain: string;
+  importance: number; // 중요도 1=하 2=중 3=상
   created_at?: string;
 }
 
-export type ExamInput = Omit<ExamQuestion, 'id' | 'owner_id' | 'created_at' | 'subject_id'>;
+export type ExamInput = Omit<ExamQuestion, 'id' | 'owner_id' | 'created_at' | 'subject_id' | 'importance'> & { importance?: number };
 
 export interface MonthlyStat {
   label: string;   // "3월"
@@ -67,8 +69,21 @@ export interface MonthlyStat {
   total: number;   // kw + exA
 }
 
+// 과목별 통계 (study_sessions 를 과목 단위로 집계)
+export interface SubjectStat {
+  id: string;
+  name: string;
+  emoji: string;
+  kwRate: number | null;  // 세션 가중평균 암기율 % (기록 없으면 null)
+  exRate: number | null;  // 세션 가중평균 정답률 %
+  studyMin: number;       // 공부시간(분)
+  xp: number;             // 이 과목에서 얻은 XP (정답 수 × 10 기준)
+  coins: number;          // 이 과목의 공부시간 보상 코인 (1분 = 1코인 기준)
+  sessions: number;       // 세션 수
+}
+
 export interface UserProgress {
-  kwRate: number;      // 키워드 암기율 %
+  kwRate: number;      // 키워드 암기율 % (세션 가중평균, 세션 기록 없으면 상태 기반)
   exRate: number;      // 기출 정답률 %
   overall: number;     // 전체 진도율 %
   known: number;
@@ -76,6 +91,8 @@ export interface UserProgress {
   exCorrect: number;
   exAnswered: number;
   cheers: number;
+  studyMin: number;    // 총 공부시간(분) — 실제 문제 푼 시간
+  bySubject: SubjectStat[]; // 과목별 통계
   monthly: MonthlyStat[];
 }
 
@@ -98,7 +115,10 @@ export interface LeagueEntry {
   id: string;
   name: string;
   emoji: string;
-  xp: number;
+  xp: number;        // 이번 주 XP
+  studyMin: number;  // 이번 주 공부시간(분)
+  quality: number;   // 이번 주 과목별 평균 정답률(암기율·정답률 평균, 0~100)
+  score: number;     // 순위 점수 = 공부시간×3 + XP + 평균 정답률
   rank: number;
   me: boolean;
   promote: boolean;
@@ -108,6 +128,7 @@ export interface LeagueEntry {
 export interface RewardResult {
   state: GamifyState;
   gainedXp: number;
+  gainedCoins: number;  // 세션 완료 시 공부시간 비례 코인 (1분 = 1코인)
   streakUp: boolean;
   leveledGoal: boolean; // 오늘 목표 달성 순간
 }

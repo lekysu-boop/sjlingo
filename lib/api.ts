@@ -31,6 +31,9 @@ export const updateKeyword = (id: string, patch: Partial<KeywordInput>) =>
   fetch(`/api/keywords/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }).then(j<Keyword>);
 export const deleteKeyword = (id: string) =>
   fetch(`/api/keywords/${id}`, { method: 'DELETE' }).then(j<{ ok: boolean }>);
+export const deleteAllKeywords = (userId: string, subjectId: string) =>
+  fetch(`/api/keywords?userId=${userId}&subjectId=${subjectId}`, { method: 'DELETE' })
+    .then(j<{ deleted: number }>);
 
 // ---- 기출 ----
 export const listExams = (userId: string, subjectId: string) =>
@@ -42,6 +45,9 @@ export const updateExam = (id: string, patch: Partial<ExamInput>) =>
   fetch(`/api/exams/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }).then(j<ExamQuestion>);
 export const deleteExam = (id: string) =>
   fetch(`/api/exams/${id}`, { method: 'DELETE' }).then(j<{ ok: boolean }>);
+export const deleteAllExams = (userId: string, subjectId: string) =>
+  fetch(`/api/exams?userId=${userId}&subjectId=${subjectId}`, { method: 'DELETE' })
+    .then(j<{ deleted: number }>);
 
 // ---- 학습 기록 ----
 export const recordKeyword = (userId: string, keywordId: string, known: boolean) =>
@@ -50,6 +56,10 @@ export const recordAttempt = (userId: string, questionId: string, correct: boole
   fetch('/api/exams/attempt', { method: 'POST', body: JSON.stringify({ userId, questionId, correct }) }).then(j);
 export const wrongExamIds = (userId: string) =>
   fetch(`/api/exams/attempt?userId=${userId}`).then(j<{ wrongIds: string[] }>);
+
+// 학습 세션 1회 기록 (공부시간·정답률 → 통계/리그의 원천)
+export const recordSession = (body: { userId: string; subjectId: string; kind: 'kw' | 'ex'; total: number; correct: number; durationSec: number }) =>
+  fetch('/api/sessions', { method: 'POST', body: JSON.stringify(body) }).then(j<{ ok: boolean }>);
 
 // ---- 진도·응원 ----
 export const getProgress = (userId: string) =>
@@ -65,10 +75,14 @@ export const importSheet = (userId: string, subjectId: string, kind: 'keyword' |
 // ---- 게이미피케이션 ----
 export const getGamify = (userId: string) =>
   fetch(`/api/gamify/${userId}`).then(j<GamifyState>);
-export const reward = (body: { userId: string; correct: boolean; combo?: number; sessionComplete?: boolean }) =>
+export const reward = (body: { userId: string; correct: boolean; combo?: number; sessionComplete?: boolean; durationMin?: number }) =>
   fetch('/api/gamify/reward', { method: 'POST', body: JSON.stringify(body) }).then(j<RewardResult>);
 export const getLeague = (userId: string) =>
   fetch(`/api/gamify/league?userId=${userId}`).then(j<LeagueEntry[]>);
+// 일일 퀘스트 보상(보물상자) 수령
+export const claimQuest = (userId: string, questId: string) =>
+  fetch('/api/gamify/quest', { method: 'POST', body: JSON.stringify({ userId, questId }) })
+    .then(j<{ tier: 'bronze' | 'silver' | 'gold'; coins: number; state: GamifyState }>);
 
 // ---- 이메일 로그인 (선택 기능) ----
 // 지금 화면은 이름 기반 로그인이지만, 이메일 가입 폼을 붙이면 이 함수들을 호출합니다.

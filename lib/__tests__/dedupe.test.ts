@@ -5,7 +5,7 @@
 //  실행: npm run test
 // ============================================================================
 import { describe, it, expect } from 'vitest';
-import { normCode, kwDup, exDup, dedupeKeywords } from '../dedupe';
+import { normCode, kwDup, exDup, dedupeKeywords, dedupeExactExams } from '../dedupe';
 
 describe('normCode — 암기코드 정규화 (공백/슬래시 제거)', () => {
   it('공백과 슬래시를 없앤다', () => {
@@ -41,5 +41,18 @@ describe('dedupeKeywords — 대량 입력에서 중복 걸러내기', () => {
     const r = dedupeKeywords(existing, incoming);
     expect(r.added).toBe(1);   // 균역법 1개만 추가
     expect(r.skipped).toBe(2); // 탕평책(중복) + 균역법(자기들끼리 중복) 2개 스킵
+  });
+});
+
+describe('dedupeExactExams — 정제 시트의 정확한 중복만 제거', () => {
+  it('공통 문구가 있어도 문제 전문이 다르면 둘 다 유지한다', () => {
+    const incoming = [
+      { question: '구석기 시대의 생활 모습으로 옳은 것은?' },
+      { question: '신석기 시대의 생활 모습으로 옳은 것은?' },
+      { question: '구석기 시대의 생활 모습으로 옳은 것은?' },
+    ];
+    const result = dedupeExactExams([], incoming);
+    expect(result.added).toBe(2);
+    expect(result.skipped).toBe(1);
   });
 });

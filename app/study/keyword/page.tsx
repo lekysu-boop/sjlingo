@@ -1,17 +1,28 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from '@/hooks/useSession';
 import { useKeywords } from '@/hooks/useKeywords';
 import { useGamification } from '@/hooks/useGamification';
-import { recordKeyword } from '@/lib/api';
-import { GamifyStyles, GamifyHud, Confetti, XpFloat, ComboBadge } from '@/components/Gamify';
+import { recordKeyword, recordSession } from '@/lib/api';
+import { GamifyStyles, GamifyHud, Confetti, XpFloat, ComboBadge, Mascot } from '@/components/Gamify';
 import { frontCode, GameMode } from '@/lib/gamemode';
 import { pickRotating } from '@/lib/rotation';
+import { loadSrs, saveSrs, srsReview, dueItems, type SrsMap } from '@/lib/srs';
+import { bumpQuestSession, bumpQuestCombo } from '@/lib/quests';
+import { playCorrect, playCombo, playWrong, playFinish, isSoundOn, toggleSound } from '@/lib/sound';
 import type { Keyword } from '@/lib/types';
 
 type Phase = 'setup' | 'session' | 'done';
 
+// ============================================================================
+//  PROGRAM 1: 키워드 인출 학습
+// ----------------------------------------------------------------------------
+//  화면은 phase 하나로 setup -> session -> done 상태를 전환합니다.
+//  Supabase에는 학습 이벤트/세션 통계를, localStorage에는 개인 기기용 SRS 복습일과
+//  최근 출제 순서를 저장합니다. 즉, 서버 데이터는 통계의 원천이고 로컬 데이터는
+//  다음 문제를 고르는 보조 기억장치입니다. 전체 추적 실습은 PROJECT_STUDY_GUIDE.md 참고.
+// ============================================================================
 export default function KeywordStudyPage() {
   const router = useRouter();
   const { userId, subjectId } = useSession();
@@ -22,6 +33,7 @@ export default function KeywordStudyPage() {
   const [era, setEra] = useState('전체');
   const [count, setCount] = useState(10);
   const [mode, setMode] = useState<GameMode>('full');
+  const [imp, setImp] = useState(0); // 중요도 필터: 0=전체, 2=★★ 이상, 3=★★★만
 
   const [deck, setDeck] = useState<Keyword[]>([]);
   const [idx, setIdx] = useState(0);
@@ -29,60 +41,134 @@ export default function KeywordStudyPage() {
   const [known, setKnown] = useState(0);
   const [again, setAgain] = useState(0);
   const [combo, setCombo] = useState(0);
+  const [wrongStreak, setWrongStreak] = useState(0); // 연속 오답 수 (마스코트 위로 메시지용)
+  // 세션 하트: 학습을 시작할 때마다 5개로 리셋, 틀리면 1개 소모. 0이면 세션 종료.
+  const [hearts, setHearts] = useState(5);
   const [heartBreak, setHeartBreak] = useState<number | null>(null);
+  const [endedByHearts, setEndedByHearts] = useState(false);
+  const [earnedCoins, setEarnedCoins] = useState(0); // 이번 세션 공부시간 코인
   const [masks, setMasks] = useState<string[]>([]);
+  // 망각곡선(SRS) 상태: keywordId → { box, due }. localStorage 에서 불러온다.
+  const [srsMap, setSrsMap] = useState<SrsMap>({});
+  const [sound, setSound] = useState(true);
+  const startedAt = useRef(0); // 세션 시작 시각 (공부시간 계산용)
 
   useEffect(() => { if (userId === null) router.replace('/'); }, [userId, router]);
-  useEffect(() => {
-    if (gam.fx.kind === 'wrong') { setHeartBreak(gam.state?.hearts ?? null); const t = setTimeout(() => setHeartBreak(null), 600); return () => clearTimeout(t); }
-  }, [gam.fx.seq]); // eslint-disable-line
+  useEffect(() => { setSrsMap(loadSrs(userId, subjectId)); }, [userId, subjectId]);
+  useEffect(() => { setSound(isSoundOn()); }, []);
 
-  function start() {
-    const filtered = items.filter((k) => era === '전체' || k.era === era);
+  // 선택한 범위(분류 + 중요도) 안에서 "오늘 복습할" 카드 (예정일 지난 것 + 새 카드)
+  const scoped = items.filter((k) => (era === '전체' || k.era === era) && (imp === 0 || (k.importance ?? 2) >= imp));
+  const due = dueItems(scoped, srsMap);
+
+  // review=true 면 망각곡선상 복습 예정 카드만으로 세션을 구성한다.
+  function start(review = false) {
+    const filtered = review ? due : scoped;
     if (!filtered.length) return;
-    // "최대한 중복 없이" 로테이션: 최근 출제 기록(seen)을 localStorage 에서 읽어
-    // 안 본 키워드를 우선 출제하고, 순서도 무작위로 섞는다.
-    const seenKey = `amgi_seen_kw_${userId}_${subjectId}_${era}`;
-    let seen: string[] = [];
-    try { seen = JSON.parse(localStorage.getItem(seenKey) || '[]'); } catch {}
     const n = count === 999 ? filtered.length : Math.min(count, filtered.length);
-    const result = pickRotating(filtered, seen, n);
-    try { localStorage.setItem(seenKey, JSON.stringify(result.seen)); } catch {}
-    const pool = result.picked;
+    let pool: Keyword[];
+    if (review) {
+      // 복습 모드: 가장 오래 밀린 카드부터 (dueItems 가 이미 그 순서)
+      pool = filtered.slice(0, n);
+    } else {
+      // "최대한 중복 없이" 로테이션: 최근 출제 기록(seen)을 localStorage 에서 읽어
+      // 안 본 키워드를 우선 출제하고, 순서도 무작위로 섞는다.
+      const seenKey = `amgi_seen_kw_${userId}_${subjectId}_${era}`;
+      let seen: string[] = [];
+      try { seen = JSON.parse(localStorage.getItem(seenKey) || '[]'); } catch {}
+      const result = pickRotating(filtered, seen, n);
+      try { localStorage.setItem(seenKey, JSON.stringify(result.seen)); } catch {}
+      pool = result.picked;
+    }
     setDeck(pool);
     setMasks(pool.map((c) => frontCode(c.code, mode))); // partial 마스크를 카드별로 한 번 고정
-    setIdx(0); setFlipped(false); setKnown(0); setAgain(0); setCombo(0);
+    setIdx(0); setFlipped(false); setKnown(0); setAgain(0); setCombo(0); setWrongStreak(0);
+    setHearts(5); setEndedByHearts(false); setEarnedCoins(0); // 세션 하트 리셋
+    startedAt.current = Date.now();
     setPhase('session');
+  }
+
+  // 세션 종료 공통 처리: 스트릭·시간 코인·퀘스트·통계 기록
+  function finishSession(finalKnown: number, attempted: number, byHearts: boolean) {
+    const durationSec = Math.round((Date.now() - startedAt.current) / 1000);
+    setEndedByHearts(byHearts);
+    setPhase('done');
+    gam.completeSession(durationSec / 60).then((r) => setEarnedCoins(r?.gainedCoins ?? 0));
+    refresh();
+    bumpQuestSession(userId);
+    playFinish();
+    // 세션 결과 기록 → 통계(공부시간·가중평균)와 리그 순위의 원천
+    if (userId && subjectId) {
+      recordSession({ userId, subjectId, kind: 'kw', total: attempted, correct: finalKnown, durationSec }).catch(() => {});
+    }
   }
 
   async function mark(isKnown: boolean) {
     const card = deck[idx];
     if (userId) recordKeyword(userId, card.id, isKnown).catch(() => {});
-    if (isKnown) { setKnown((n) => n + 1); setCombo((c) => c + 1); gam.onCorrect(combo + 1); }
-    else { setAgain((n) => n + 1); setCombo(0); gam.onWrong(); }
-    if (idx + 1 >= deck.length) { setPhase('done'); gam.completeSession(); refresh(); }
-    else { setIdx(idx + 1); setFlipped(false); }
+    // 망각곡선 반영: 외웠으면 복습 간격을 늘리고, 못 외웠으면 처음부터
+    const nextMap = { ...srsMap, [card.id]: srsReview(srsMap[card.id], isKnown) };
+    setSrsMap(nextMap);
+    saveSrs(userId, subjectId, nextMap);
+
+    let heartsLeft = hearts;
+    if (isKnown) {
+      const c = combo + 1;
+      setKnown((n) => n + 1); setCombo(c); setWrongStreak(0); gam.onCorrect(c);
+      bumpQuestCombo(userId, c);
+      c >= 3 ? playCombo() : playCorrect();
+    } else {
+      setWrongStreak((w) => w + 1);
+      // 세션 하트 1개 소모 + 깨지는 애니메이션
+      heartsLeft = hearts - 1;
+      setHearts(heartsLeft);
+      setHeartBreak(heartsLeft);
+      setTimeout(() => setHeartBreak(null), 600);
+      setAgain((n) => n + 1); setCombo(0); gam.onWrong();
+      playWrong();
+    }
+
+    const finalKnown = known + (isKnown ? 1 : 0);
+    if (heartsLeft <= 0) {
+      finishSession(finalKnown, idx + 1, true); // 하트 소진 → 여기까지 푼 것만 기록
+    } else if (idx + 1 >= deck.length) {
+      finishSession(finalKnown, deck.length, false);
+    } else { setIdx(idx + 1); setFlipped(false); }
   }
 
   const card = deck[idx];
   const front = mode === 'full' ? card?.code : masks[idx];
 
   return (
-    <div style={wrap}><GamifyStyles /><div style={phone}>
+    <div className="app-wrap"><GamifyStyles /><div className="app-phone">
       {/* 상단바 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
         <button onClick={() => router.push('/home')} style={iconBtn}>←</button>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 20, fontWeight: 900, color: '#0f172a' }}>키워드 인출 학습</div>
-          <div style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>{items.length}개 등록됨</div>
+          <div style={{ fontSize: 13.5, color: '#94a3b8', fontWeight: 600 }}>{items.length}개 등록됨</div>
         </div>
+        <button onClick={() => setSound(toggleSound())} style={iconBtn} title="효과음 켜기/끄기">{sound ? '🔊' : '🔇'}</button>
       </div>
-      {phase === 'session' && <div style={{ marginBottom: 14 }}><GamifyHud state={gam.state} heartBreakIdx={heartBreak} /></div>}
+      {phase === 'session' && <div style={{ marginBottom: 14 }}><GamifyHud state={gam.state} hearts={hearts} heartBreakIdx={heartBreak} /></div>}
 
       {phase === 'setup' && (items.length === 0 ? (
         <Empty onGo={() => router.push('/data')} />
       ) : (
         <>
+          {/* 오늘의 복습 — 망각곡선상 "지금 다시 봐야 기억이 굳는" 카드들 */}
+          {due.length > 0 && (
+            <button onClick={() => start(true)} style={{ display: 'block', width: '100%', textAlign: 'left', border: 'none', cursor: 'pointer', borderRadius: 20, padding: '16px 18px', marginBottom: 18, color: '#fff', background: 'linear-gradient(135deg,#0ea5e9,#6366f1)', boxShadow: '0 14px 30px -12px rgba(14,165,233,.55)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 28 }}>🧠</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 16, fontWeight: 900 }}>오늘의 복습 {due.length}개</div>
+                  <div style={{ fontSize: 11.5, opacity: .9, fontWeight: 700, marginTop: 2 }}>잊어버리기 직전에 다시 보면 기억이 오래가요 (망각곡선)</div>
+                </div>
+                <span style={{ fontSize: 13, fontWeight: 900, background: 'rgba(255,255,255,.22)', padding: '8px 12px', borderRadius: 12 }}>시작 →</span>
+              </div>
+            </button>
+          )}
           <Section title="📌 학습 범위">
             {eras.map((e) => (
               <Pick key={e} active={era === e} color="#2563eb" onClick={() => setEra(e)}>
@@ -90,7 +176,12 @@ export default function KeywordStudyPage() {
               </Pick>
             ))}
           </Section>
-          <Section title="🎮 암기코드 게임 모드">
+          <Section title="⭐ 중요도">
+            {([[0, '전체'], [2, '★★ 이상'], [3, '★★★만']] as const).map(([v, label]) => (
+              <Pick key={v} active={imp === v} color="#2563eb" onClick={() => setImp(v)} grow>{label}</Pick>
+            ))}
+          </Section>
+          <Section title="🎮 키워드 게임 모드">
             {([['full', '🔡 전체'], ['choseong', '🈳 초성만'], ['partial', '🎬 일부만']] as const).map(([m, label]) => (
               <Pick key={m} active={mode === m} color="#2563eb" onClick={() => setMode(m)} grow>{label}</Pick>
             ))}
@@ -100,7 +191,7 @@ export default function KeywordStudyPage() {
               <Pick key={c} active={count === c} color="#2563eb" onClick={() => setCount(c)} grow>{c === 999 ? '전체' : c}</Pick>
             ))}
           </Section>
-          <button onClick={start} style={primary('#2563eb')}>학습 시작하기</button>
+          <button onClick={() => start()} style={primary('#2563eb')}>학습 시작하기</button>
         </>
       ))}
 
@@ -110,29 +201,38 @@ export default function KeywordStudyPage() {
           <XpFloat trigger={gam.fx.kind === 'correct' ? gam.fx.seq : 0} amount={gam.fx.gainedXp ?? 0} />
           <Progress value={idx} total={deck.length} known={known} again={again} />
           <div style={{ marginTop: 8 }}><ComboBadge combo={combo} /></div>
-          <div style={{ perspective: 1600, height: 340, marginTop: 12 }} onClick={() => setFlipped((f) => !f)}>
+          <Mascot kind={gam.fx.kind} seq={gam.fx.seq} combo={combo} wrongStreak={wrongStreak} emoji="🦉" />
+          <div style={{ perspective: 1600, height: 410, marginTop: 12 }} onClick={() => setFlipped((f) => !f)}>
             <div style={{ position: 'relative', width: '100%', height: '100%', transition: 'transform .55s', transformStyle: 'preserve-3d', transform: flipped ? 'rotateY(180deg)' : 'none', cursor: 'pointer' }}>
               {/* 앞면 */}
               <div style={{ ...face, background: '#fff', border: '1px solid #eef2f7' }}>
-                <span style={pill('#eff6ff', '#2563eb')}>{card.era}</span>
-                <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 700, margin: '16px 0' }}>이 암기코드, 설명할 수 있나요?</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center' }}>
+                  <span style={pill('#eff6ff', '#2563eb')}>{card.era}</span>
+                  {card.day && <span style={pill('#f1f5f9', '#64748b')}>{card.day}</span>}
+                  <span style={{ color: '#f59e0b', fontWeight: 900, fontSize: 13, letterSpacing: 1 }}>{'★'.repeat(card.importance ?? 2)}</span>
+                </div>
+                <div style={{ fontSize: 14.5, color: '#94a3b8', fontWeight: 700, margin: '16px 0' }}>이 키워드, 설명할 수 있나요?</div>
                 {mode !== 'full' && <span style={pill('#eef2ff', '#4f46e5')}>🎮 {mode === 'choseong' ? '초성만' : '일부만'} 모드</span>}
-                <div style={{ fontSize: 28, fontWeight: 900, color: '#0f172a', letterSpacing: 2, marginTop: 10, lineHeight: 1.35 }}>{front}</div>
+                {/* 암기코드 길이에 따라 폰트를 계단식으로: 짧으면 아주 큼직하게, 길면 카드에 맞게 */}
+                <div style={{ fontSize: fitFont((front ?? '').length, [[6, 44], [10, 37], [16, 30], [24, 26]], 22), fontWeight: 900, color: '#0f172a', letterSpacing: (front ?? '').length <= 10 ? 2 : 0.5, marginTop: 10, lineHeight: 1.35, wordBreak: 'keep-all' }}>{front}</div>
                 <div style={{ marginTop: 20, color: '#cbd5e1', fontSize: 13, fontWeight: 700 }}>👆 탭해서 설명 확인</div>
               </div>
               {/* 뒷면 */}
-              <div style={{ ...face, transform: 'rotateY(180deg)', background: 'linear-gradient(160deg,#1e3a8a,#1d4ed8)', color: '#fff', overflow: 'auto', justifyContent: 'flex-start', textAlign: 'left' }}>
-                <div style={{ fontSize: 21, fontWeight: 900, marginBottom: 12 }}>{card.code}</div>
-                <div style={{ background: '#fbbf24', color: '#78350f', borderRadius: 16, padding: 14, marginBottom: 10 }}>
-                  <div style={{ fontSize: 11, fontWeight: 900, marginBottom: 4 }}>📖 역사적 핵심 개념</div>
-                  <div style={{ fontSize: 17, fontWeight: 800, lineHeight: 1.4 }}>{card.concept}</div>
+              {/* 뒷면 — 개념·연상법이 여러 문장으로 길 수 있어(엑셀 샘플 기준) 세로 스크롤을 전제로 배치 */}
+              <div style={{ ...face, transform: 'rotateY(180deg)', background: 'linear-gradient(160deg,#1e3a8a,#1d4ed8)', color: '#fff', overflow: 'auto', justifyContent: 'flex-start', textAlign: 'left', padding: 20 }}>
+                {/* 뒷면도 내용 길이에 맞춰 폰트를 조절 — 짧은 설명은 큼직하게 읽힌다 */}
+                <div style={{ fontSize: fitFont(card.code.length, [[8, 27], [14, 23]], 20), fontWeight: 900, marginBottom: 10, flexShrink: 0, wordBreak: 'keep-all' }}>{card.code}</div>
+                <div style={{ background: '#fbbf24', color: '#78350f', borderRadius: 16, padding: 14, marginBottom: 10, flexShrink: 0 }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 900, marginBottom: 5 }}>📖 뜻·핵심 개념</div>
+                  <div style={{ fontSize: fitFont(card.concept.length, [[40, 20], [80, 18], [140, 16.5]], 15), fontWeight: 800, lineHeight: 1.55, wordBreak: 'keep-all' }}>{card.concept}</div>
                 </div>
                 {card.principle && (
-                  <div style={{ background: 'rgba(255,255,255,.12)', borderRadius: 16, padding: 14 }}>
-                    <div style={{ fontSize: 11, fontWeight: 800, opacity: .8, marginBottom: 4 }}>💡 연상 기법·매칭 원리</div>
-                    <div style={{ fontSize: 14, lineHeight: 1.6 }}>{card.principle}</div>
+                  <div style={{ background: 'rgba(255,255,255,.12)', borderRadius: 16, padding: 14, flexShrink: 0 }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, opacity: .8, marginBottom: 5 }}>💡 연상법·설명</div>
+                    <Principle text={card.principle} />
                   </div>
                 )}
+                <div style={{ textAlign: 'center', fontSize: 11, fontWeight: 700, opacity: .55, marginTop: 10, flexShrink: 0 }}>내용이 길면 카드 안에서 스크롤 ↕</div>
               </div>
             </div>
           </div>
@@ -146,9 +246,10 @@ export default function KeywordStudyPage() {
       {phase === 'done' && (
         <div style={{ ...resultCard, position: 'relative', overflow: 'hidden' }}>
           <Confetti trigger={1} count={28} loop />
-          <div style={{ fontSize: 44, animation: 'gm-jump 1.3s ease-in-out infinite', zIndex: 1 }}>🎉</div>
-          <div style={{ fontSize: 22, fontWeight: 900, color: '#0f172a', zIndex: 1 }}>키워드 학습 완료!</div>
-          {gam.state && <div style={{ fontSize: 13, fontWeight: 800, color: '#ea580c', zIndex: 1 }}>🔥 {gam.state.streak}일 연속 · 🪙 +20</div>}
+          <div style={{ fontSize: 44, animation: 'gm-jump 1.3s ease-in-out infinite', zIndex: 1 }}>{endedByHearts ? '💔' : '🎉'}</div>
+          <div style={{ fontSize: 22, fontWeight: 900, color: '#0f172a', zIndex: 1 }}>{endedByHearts ? '하트를 다 썼어요!' : '키워드 학습 완료!'}</div>
+          {endedByHearts && <div style={{ fontSize: 13, fontWeight: 700, color: '#94a3b8', zIndex: 1 }}>조금 쉬었다가 다시 도전해요 💪 (푼 만큼은 기록됐어요)</div>}
+          {gam.state && <div style={{ fontSize: 13.5, fontWeight: 800, color: '#ea580c', zIndex: 1 }}>🔥 {gam.state.streak}일 연속{earnedCoins > 0 ? ` · 🪙 +${earnedCoins} (공부시간 보상)` : ''}</div>}
           <div style={{ display: 'flex', gap: 12, margin: '10px 0', zIndex: 1 }}>
             <Score n={known} label="외웠음" c="#16a34a" bg="#dcfce7" />
             <Score n={again} label="복습 대상" c="#dc2626" bg="#fee2e2" />
@@ -165,6 +266,34 @@ export default function KeywordStudyPage() {
 
 function shuffle<T>(a: T[]): T[] { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 
+// 글자 수에 따라 폰트 크기를 계단식으로 결정.
+// steps: [최대 글자 수, 폰트 크기] 목록 (오름차순). 모두 초과하면 min 사용.
+// 예) fitFont(5, [[6,44],[10,37]], 22) → 44  /  fitFont(30, ...) → 22
+function fitFont(len: number, steps: [number, number][], min: number): number {
+  for (const [maxLen, size] of steps) if (len <= maxLen) return size;
+  return min;
+}
+
+// 연상 기법 표시.
+// 엑셀 샘플처럼 "웰컴(환영) + 구(구석기) + 동(동굴)" 식으로 ' + ' 구분자가 있으면
+// 글자별 대응이 눈에 들어오도록 줄별 목록으로 풀어 보여준다. 구분자가 없으면 문장 그대로.
+const Principle = ({ text }: { text: string }) => {
+  // 연상법도 길이에 맞춰 폰트 조절: 짧으면 크게, 길면 알맞게
+  const size = fitFont(text.length, [[60, 17], [120, 15.5]], 14.5);
+  const segs = text.split(/\s\+\s/).map((s) => s.trim()).filter(Boolean);
+  if (segs.length < 3) return <div style={{ fontSize: size, lineHeight: 1.65, wordBreak: 'keep-all' }}>{text}</div>;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {segs.map((s, i) => (
+        <div key={i} style={{ display: 'flex', gap: 7, fontSize: size, lineHeight: 1.55, wordBreak: 'keep-all' }}>
+          <span style={{ opacity: .7, fontWeight: 900 }}>▸</span>
+          <span>{s}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const Empty = ({ onGo }: { onGo: () => void }) => (
   <div style={{ background: '#fff', borderRadius: 20, padding: '26px 20px', textAlign: 'center', boxShadow: '0 10px 30px -18px rgba(15,23,42,.25)' }}>
     <div style={{ fontSize: 40 }}>📭</div>
@@ -175,12 +304,12 @@ const Empty = ({ onGo }: { onGo: () => void }) => (
 );
 const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
   <div style={{ marginBottom: 22 }}>
-    <div style={{ fontSize: 14, fontWeight: 800, color: '#0f172a', marginBottom: 10 }}>{title}</div>
+    <div style={{ fontSize: 15.5, fontWeight: 800, color: '#0f172a', marginBottom: 10 }}>{title}</div>
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>{children}</div>
   </div>
 );
 const Pick = ({ active, color, onClick, children, grow }: { active: boolean; color: string; onClick: () => void; children: React.ReactNode; grow?: boolean }) => (
-  <button onClick={onClick} style={{ flex: grow ? 1 : undefined, fontSize: 14, fontWeight: 900, padding: grow ? '13px 0' : '9px 15px', borderRadius: 14, cursor: 'pointer', background: active ? color : '#fff', color: active ? '#fff' : '#475569', border: `2px solid ${active ? color : '#e2e8f0'}` }}>{children}</button>
+  <button onClick={onClick} style={{ flex: grow ? 1 : undefined, fontSize: 15, fontWeight: 900, padding: grow ? '14px 0' : '10px 17px', borderRadius: 14, cursor: 'pointer', background: active ? color : '#fff', color: active ? '#fff' : '#475569', border: `2px solid ${active ? color : '#e2e8f0'}` }}>{children}</button>
 );
 const Progress = ({ value, total, known, again }: { value: number; total: number; known: number; again: number }) => (
   <div>
@@ -203,8 +332,6 @@ const Score = ({ n, label, c, bg }: { n: number; label: string; c: string; bg: s
   </div>
 );
 
-const wrap: React.CSSProperties = { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 };
-const phone: React.CSSProperties = { width: 380, minHeight: 700, background: '#f4f6fa', borderRadius: 32, padding: '24px 20px', boxShadow: '0 30px 60px -30px rgba(15,23,42,.4)' };
 const iconBtn: React.CSSProperties = { width: 38, height: 38, borderRadius: 12, background: '#fff', border: 'none', fontSize: 18, color: '#334155', cursor: 'pointer', boxShadow: '0 6px 16px -10px rgba(15,23,42,.4)' };
 const face: React.CSSProperties = { position: 'absolute', inset: 0, backfaceVisibility: 'hidden', borderRadius: 28, boxShadow: '0 26px 50px -22px rgba(15,23,42,.35)', padding: 26, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' };
 const rate: React.CSSProperties = { flex: 1, border: 'none', borderRadius: 20, padding: 16, fontSize: 15, fontWeight: 900, cursor: 'pointer' };

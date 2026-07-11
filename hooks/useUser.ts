@@ -33,13 +33,22 @@ export function useUser() {
   const [users, setUsers] = useState<Profile[]>([]);          // 전체 사용자 목록
   const [currentId, setCurrentId] = useState<string | null>(null); // 로그인한 id
   const [loading, setLoading] = useState(true);                // 첫 로딩 중 여부
+  const [error, setError] = useState<string | null>(null);     // API/DB 연결 실패 안내
 
   // 서버에서 사용자 목록을 다시 불러오는 함수.
   // async/await : listUsers() 가 네트워크로 데이터를 받아올 때까지 기다립니다.
   const refresh = useCallback(async () => {
-    const list = await listUsers(); // GET /api/users 호출
-    setUsers(list);
-    return list;
+    setError(null);
+    try {
+      const list = await listUsers(); // GET /api/users 호출
+      setUsers(list);
+      return list;
+    } catch (cause) {
+      // 실패를 숨기면 로그인 화면이 빈 것처럼 보이므로 화면에서 안내할 메시지를 보관합니다.
+      const message = cause instanceof Error ? cause.message : '사용자 목록을 불러오지 못했습니다.';
+      setError(message);
+      throw cause;
+    }
   }, []);
 
   // useEffect(fn, []) : []("의존성 배열"이 빔) → 컴포넌트가 처음 화면에 뜰 때
@@ -47,13 +56,19 @@ export function useUser() {
   useEffect(() => {
     // 즉시 실행 async 함수. (useEffect 자체는 async 가 될 수 없어서 안에서 감쌈)
     (async () => {
-      const list = await refresh();
-      // 브라우저에 저장해 둔 이전 로그인 id 를 읽어 자동 로그인.
-      const saved = typeof window !== 'undefined' ? localStorage.getItem(LS_KEY) : null;
-      // some(...) : 목록 안에 그 id 가 실제로 있는지 확인(삭제된 사용자 방지).
-      // (u) => u.id === saved 는 "화살표 함수". Java 의 람다 u -> u.getId().equals(saved) 와 같습니다.
-      if (saved && list.some((u) => u.id === saved)) setCurrentId(saved);
-      setLoading(false);
+      try {
+        const list = await refresh();
+        // 브라우저에 저장해 둔 이전 로그인 id 를 읽어 자동 로그인.
+        const saved = typeof window !== 'undefined' ? localStorage.getItem(LS_KEY) : null;
+        // some(...) : 목록 안에 그 id 가 실제로 있는지 확인(삭제된 사용자 방지).
+        // (u) => u.id === saved 는 "화살표 함수". Java 의 람다 u -> u.getId().equals(saved) 와 같습니다.
+        if (saved && list.some((u) => u.id === saved)) setCurrentId(saved);
+      } catch {
+        // 오류 내용은 refresh가 error 상태에 저장합니다. 여기서는 미처리 Promise만 막습니다.
+      } finally {
+        // 성공/실패 어느 경우든 로딩을 끝내야 화면이 무한 로딩에 갇히지 않습니다.
+        setLoading(false);
+      }
     })();
   }, [refresh]);
 
@@ -74,5 +89,5 @@ export function useUser() {
   const current = users.find((u) => u.id === currentId) ?? null;
 
   // 화면이 사용할 값·함수들을 객체로 묶어 반환. (Service 의 public 메서드 모음과 비슷)
-  return { users, current, currentId, loading, login, logout, refresh, setUsers };
+  return { users, current, currentId, loading, error, login, logout, refresh, setUsers };
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { clampImportance } from '@/lib/importance';
 
 export const runtime = 'nodejs';
 
@@ -13,6 +14,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     patch.options = body.options.map((o: string) => (o || '').trim()).filter((o: string) => o !== '');
   if (typeof body.answer === 'number') patch.answer = body.answer;
   if (typeof body.explain === 'string') patch.explain = body.explain.trim();
+  if (body.importance !== undefined) patch.importance = clampImportance(body.importance);
 
   const db = createAdminClient();
   const { data, error } = await db

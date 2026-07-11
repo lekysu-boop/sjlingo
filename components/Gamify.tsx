@@ -65,8 +65,9 @@ export function XpFloat({ trigger, amount }: { trigger: number; amount: number }
   );
 }
 
-// 상단 HUD: XP 링 + 스트릭 + 코인 + 하트
-export function GamifyHud({ state, heartBreakIdx }: { state: GamifyState | null; heartBreakIdx?: number | null }) {
+// 상단 HUD: XP 링 + 스트릭 + 코인 + (세션) 하트
+// hearts: 이번 세션에서 남은 기회. 학습 화면이 세션마다 5개로 리셋해 관리한다.
+export function GamifyHud({ state, hearts, maxHearts = 5, heartBreakIdx }: { state: GamifyState | null; hearts?: number; maxHearts?: number; heartBreakIdx?: number | null }) {
   if (!state) return null;
   const ring = 314;
   const off = ring * (1 - Math.min(1, state.todayXp / state.dailyGoal));
@@ -90,13 +91,80 @@ export function GamifyHud({ state, heartBreakIdx }: { state: GamifyState | null;
         <span style={{ fontSize: 15 }}>🪙</span>
         <span style={{ fontSize: 14, fontWeight: 900, color: '#ca8a04' }}>{state.coins}</span>
       </div>
-      <div style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
-        {Array.from({ length: state.maxHearts }, (_, i) => {
-          const filled = i < state.hearts;
-          const breaking = heartBreakIdx != null && i === state.hearts;
-          return <span key={i} style={{ fontSize: 18, animation: breaking ? 'gm-heartbreak .5s ease forwards' : 'none', display: 'inline-block' }}>{filled ? '❤️' : '🤍'}</span>;
-        })}
-      </div>
+      {hearts !== undefined && (
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
+          {Array.from({ length: maxHearts }, (_, i) => {
+            const filled = i < hearts;
+            const breaking = heartBreakIdx != null && i === hearts;
+            return <span key={i} style={{ fontSize: 18, animation: breaking ? 'gm-heartbreak .5s ease forwards' : 'none', display: 'inline-block' }}>{filled ? '❤️' : '🤍'}</span>;
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+//  Mascot — 듀오링고의 올빼미처럼, 답을 낼 때마다 반응해 주는 응원 캐릭터
+//  상황(첫 정답 / 콤보 / 대콤보 / 오답 / 연속 오답 / 목표 / 스트릭)별로
+//  메시지 풀을 나눠, 같은 이벤트여도 매번 다른 말이 나온다. (중고생 톤)
+// ----------------------------------------------------------------------------
+const MSG = {
+  // 일반 정답
+  cheer: [
+    '오 바로 맞히네? 좀 치는데 😎', 'ㅇㅈ! 완벽 정답~', '굿굿 이 감각 그대로 가자 🏄',
+    '척 보면 척이지 👀', '어렵지 않았죠~ 다음 문제 ㄱㄱ', '깔끔하게 정답! 기분 좋다 ✨',
+    '오늘 컨디션 좋은데? 쭉 가자~', '이 정도면 시험장 가도 되겠는데?',
+  ],
+  // 3~4 콤보
+  combo3: [
+    '3연속?! 폼 미쳤다 🔥', '콤보 쌓이는 소리 들린다 📈', '지금 완전 흐름 탔어~ 끊지 마!',
+    '오늘 좀 되는 날인데? 😏', '무빙 좋다~ 이대로 클리어 가자',
+  ],
+  // 5콤보 이상
+  combo5: [
+    '5콤보 실화냐?! 미쳤다 진짜 🤯', '아니 이걸 다 맞혀? 천재 인정 👑', '이 구역 에이스 등장 🏆',
+    '전설의 시작인가… ⚡', '멈출 수 없는 콤보 기계 ㄷㄷ', '지금 리그 1등 각 제대로 잡았다 🎯',
+  ],
+  // 일반 오답
+  oops: [
+    '아깝… 진짜 한 끗 차이 😭', '삐끗! 괜찮아 다시 ㄱㄱ', '이건 함정픽이었다… 다음엔 안 속지 😤',
+    '틀린 건 뇌에 더 오래 남는대, 오히려 이득 😌', '어? 이거 복습함으로 저장~ 다음에 잡자',
+    '노 프라블럼~ 한 문제일 뿐이야', '지금 틀려야 시험장에서 안 틀리지 💪',
+  ],
+  // 연속 2번 이상 오답
+  oops2: [
+    '잠깐 스탑! 숨 한번 쉬고 가자 🧘', '멘탈 부여잡기~ 다음 건 맞힐 각이야', '어려운 구간이네;; 천천히 읽어보자 🔍',
+    '괜찮아 괜찮아, 여기서 반등 가자 📈', '연속 오답은 실력이 크는 소리… 진짜임 🌱',
+  ],
+  // 오늘 목표 달성
+  goal: ['오늘 목표 클리어!! 🎉 폼 미쳤다', '일일 목표 달성! 이게 되네 ㄷㄷ 🏅', '목표 깼다! 오늘 할 일 다 한 사람 = 나 😎'],
+  // 스트릭 갱신
+  streak: ['스트릭 이어짐 🔥 꾸준함 무엇~', '연속 학습 기록 갱신! 내일도 콜? 🤙', '매일 하는 사람은 못 이겨… 그게 너야 🔥'],
+};
+
+export function Mascot({ kind, seq, combo = 0, wrongStreak = 0, emoji = '🦉' }: { kind: 'correct' | 'wrong' | 'goal' | 'streak' | null; seq: number; combo?: number; wrongStreak?: number; emoji?: string }) {
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => {
+    if (!seq || !kind) return;
+    // 상황에 맞는 메시지 풀 선택
+    const pool =
+      kind === 'goal' ? MSG.goal
+      : kind === 'streak' ? MSG.streak
+      : kind === 'wrong' ? (wrongStreak >= 2 ? MSG.oops2 : MSG.oops)
+      : combo >= 5 ? MSG.combo5
+      : combo >= 3 ? MSG.combo3
+      : MSG.cheer;
+    setMsg(pool[Math.floor(Math.random() * pool.length)]);
+    const t = setTimeout(() => setMsg(null), 2200);
+    return () => clearTimeout(t);
+  }, [seq]); // eslint-disable-line
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 46 }}>
+      <span style={{ fontSize: 30, display: 'inline-block', animation: msg ? (kind === 'wrong' ? 'gm-shake .5s ease' : 'gm-jump .8s ease') : 'gm-wiggle 3s ease-in-out infinite' }}>{emoji}</span>
+      {msg && (
+        <div key={seq} style={{ background: '#fff', border: '2px solid #e2e8f0', borderRadius: '14px 14px 14px 4px', padding: '8px 12px', fontSize: 13.5, fontWeight: 800, color: '#334155', animation: 'gm-pop .3s ease', boxShadow: '0 6px 14px -8px rgba(15,23,42,.3)' }}>{msg}</div>
+      )}
     </div>
   );
 }

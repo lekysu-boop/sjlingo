@@ -9,6 +9,7 @@
 > - **[`GETTING_STARTED.md`](./GETTING_STARTED.md)** — VS Code만 깔린 상태에서 실행~배포까지 처음부터 (여기부터!)
 > - **[`WORKFLOW.md`](./WORKFLOW.md)** — claude.ai↔GitHub↔VS Code 관계 (코드 동기화가 헷갈리면 필독)
 > - **[`LEARN.md`](./LEARN.md)** — 모던 JS 문법·React·Next 개념을 익숙한 것에 빗대어 설명 + 용어집
+> - **[`PROJECT_STUDY_GUIDE.md`](./PROJECT_STUDY_GUIDE.md)** — 실제 프로그램 흐름을 따라가는 5일 실습·디버깅 가이드
 > - **[`DATABASE.md`](./DATABASE.md)** — DB 관리 툴·DDL/DML·백업 (Oracle/MSSQL 경험자용)
 > - **[`GUIDE.md`](./GUIDE.md)** — 개발 도구(VS Code/IntelliJ) 추천, 이 스택의 시장 위상,
 >   남의 JS 관리법, 풀스택 학습 로드맵
@@ -154,14 +155,16 @@ npm run dev            # http://localhost:3000
 
 1. **[`LEARN.md`](./LEARN.md) 통독** — 모던 JS 문법(`=>`, `async/await`, 구조 분해),
    React 훅, Next.js "파일=URL" 개념을 익숙한 개념에 빗대어 설명. 용어집 포함.
-2. **데이터 모양 파악** — `lib/types.ts` → `supabase/schema.sql` (Oracle DDL 처럼 읽힘).
-3. **API 한 개를 깊게** — `app/api/users/route.ts` (가장 주석이 상세). GET/POST 패턴을
+2. **[`PROJECT_STUDY_GUIDE.md`](./PROJECT_STUDY_GUIDE.md) 실습** — 키워드·기출·데이터 관리의
+   화면 → API → DB 흐름을 하루씩 직접 추적하고 테스트·디버깅합니다.
+3. **데이터 모양 파악** — `lib/types.ts` → `supabase/schema.sql` (Oracle DDL 처럼 읽힘).
+4. **API 한 개를 깊게** — `app/api/users/route.ts` (가장 주석이 상세). GET/POST 패턴을
    여기서 익히면 `keywords`·`exams`·`gamify` 는 같은 패턴의 반복이라 술술 읽힙니다.
-4. **DB 접속 계층** — `lib/supabase/admin.ts` (JDBC Connection 자리, 보안 주의점).
-5. **화면 로직(Service)** — `hooks/useUser.ts` (커스텀 훅 = Service 비유, 주석 상세).
-6. **화면(View)** — `app/page.tsx`(로그인) → `app/home/page.tsx`(홈)에서 위 조각들이
+5. **DB 접속 계층** — `lib/supabase/admin.ts` (JDBC Connection 자리, 보안 주의점).
+6. **화면 로직(Service)** — `hooks/useUser.ts` (커스텀 훅 = Service 비유, 주석 상세).
+7. **화면(View)** — `app/page.tsx`(로그인) → `app/home/page.tsx`(홈)에서 위 조각들이
    어떻게 조립되는지 확인.
-7. **배포** — [`DEPLOY.md`](./DEPLOY.md) 를 따라 GitHub → Vercel → Supabase 연결.
+8. **배포** — [`DEPLOY.md`](./DEPLOY.md) 를 따라 GitHub → Vercel → Supabase 연결.
 
 ### 아키텍처 대응표 (익숙한 것 → 이 프로젝트)
 

@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useSession } from '@/hooks/useSession';
 import { getLeague } from '@/lib/api';
 import { GamifyStyles } from '@/components/Gamify';
+import { TabBar } from '@/components/TabBar';
 import type { LeagueEntry } from '@/lib/types';
 
 // 주간 리그·리더보드: 이번 주 XP 순위. 상위 3명 승급.
@@ -19,16 +20,16 @@ export default function LeaguePage() {
     getLeague(userId).then((l) => { setLeague(l); setLoading(false); }).catch(() => setLoading(false));
   }, [userId]);
 
-  const max = league.length ? Math.max(...league.map((p) => p.xp), 1) : 1;
+  const max = league.length ? Math.max(...league.map((p) => p.score), 1) : 1;
 
   return (
-    <div style={wrap}>
+    <div className="app-wrap">
       <GamifyStyles />
-      <div style={phone}>
+      <div className="app-phone with-tabbar">
         <div style={{ textAlign: 'center', marginBottom: 16, paddingTop: 6 }}>
           <div style={{ fontSize: 44 }}>🏆</div>
           <div style={{ fontSize: 21, fontWeight: 900, color: '#0f172a' }}>골드 리그</div>
-          <div style={{ fontSize: 12.5, color: '#94a3b8', fontWeight: 700 }}>이번 주 XP 순위 · 상위 3명 승급!</div>
+          <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 700, lineHeight: 1.5 }}>이번 주 공부시간×3 + XP + 평균 정답률 합산 순위<br />상위 3명 승급!</div>
         </div>
 
         {loading && <div style={{ textAlign: 'center', color: '#94a3b8', fontWeight: 700, padding: '30px 0' }}>불러오는 중…</div>}
@@ -46,14 +47,15 @@ export default function LeaguePage() {
                 <div style={{ fontSize: 16, fontWeight: 900, color: rankColor, width: 26, textAlign: 'center', flexShrink: 0 }}>{p.rank}</div>
                 <div style={{ fontSize: 24 }}>{p.emoji}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 15, fontWeight: 900, color: '#0f172a' }}>{p.name}{p.me ? ' (나)' : ''}</div>
+                  <div style={{ fontSize: 15.5, fontWeight: 900, color: '#0f172a' }}>{p.name}{p.me ? ' (나)' : ''}</div>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: '#94a3b8', marginTop: 1 }}>⏱ {p.studyMin}분 · ⚡ {p.xp} XP · 🎯 평균 {p.quality}%</div>
                   <div style={{ height: 6, background: '#e2e8f0', borderRadius: 99, marginTop: 5, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${Math.round(p.xp / max * 100)}%`, background: p.me ? 'linear-gradient(90deg,#3b82f6,#22c55e)' : '#cbd5e1', borderRadius: 99 }} />
+                    <div style={{ height: '100%', width: `${Math.round(p.score / max * 100)}%`, background: p.me ? 'linear-gradient(90deg,#3b82f6,#22c55e)' : '#cbd5e1', borderRadius: 99 }} />
                   </div>
                 </div>
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div style={{ fontSize: 15, fontWeight: 900, color: '#0f172a' }}>{p.xp}</div>
-                  <div style={{ fontSize: 9, fontWeight: 800, color: '#94a3b8' }}>XP</div>
+                  <div style={{ fontSize: 16, fontWeight: 900, color: '#0f172a' }}>{p.score}</div>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8' }}>점</div>
                 </div>
                 {p.promote && <div style={{ fontSize: 15 }}>⬆️</div>}
               </div>
@@ -61,17 +63,9 @@ export default function LeaguePage() {
           })}
         </div>
 
-        <nav style={tabbar}>
-          <button onClick={() => router.push('/home')} style={{ ...tabItem, color: '#94a3b8', background: 'none', border: 'none', cursor: 'pointer' }}>🏠<br />홈</button>
-          <span style={{ ...tabItem, color: '#2563eb' }}>🏆<br />리그</span>
-          <button onClick={() => router.push('/stats')} style={{ ...tabItem, color: '#94a3b8', background: 'none', border: 'none', cursor: 'pointer' }}>📊<br />통계</button>
-        </nav>
+        <TabBar active="league" />
       </div>
     </div>
   );
 }
 
-const wrap: React.CSSProperties = { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 };
-const phone: React.CSSProperties = { width: 380, minHeight: 700, background: '#f4f6fa', borderRadius: 32, padding: '24px 20px 88px', position: 'relative', boxShadow: '0 30px 60px -30px rgba(15,23,42,.4)' };
-const tabbar: React.CSSProperties = { position: 'absolute', left: 0, right: 0, bottom: 0, height: 72, background: 'rgba(255,255,255,.94)', borderTop: '1px solid #eef2f7', borderRadius: '0 0 32px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-around', paddingTop: 8 };
-const tabItem: React.CSSProperties = { fontSize: 10.5, fontWeight: 800, textAlign: 'center', lineHeight: 1.7 };

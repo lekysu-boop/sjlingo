@@ -56,3 +56,25 @@ export function dedupeExams<T extends { question: string }>(existing: T[], incom
   });
   return { toInsert: out, added: out.length, skipped: skip };
 }
+
+// 정제 완료된 대량 시트는 서로 다른 문항에도 "이 시대의 모습으로 옳은 것은" 같은
+// 공통 문구가 많습니다. 따라서 시트 적재에서는 5단어 유사도 대신 문제 전문이 같은
+// 경우만 중복으로 봐서 정상 문항이 대량으로 누락되지 않게 합니다.
+export function dedupeExactExams<T extends { question: string }>(existing: T[], incoming: T[]) {
+  const normalize = (question: string) => (question || '').trim().replace(/\s+/g, ' ');
+  const seen = new Set(existing.map((item) => normalize(item.question)).filter(Boolean));
+  const toInsert: T[] = [];
+  let skipped = 0;
+
+  incoming.forEach((item) => {
+    const normalized = normalize(item.question);
+    if (!normalized || seen.has(normalized)) {
+      skipped++;
+      return;
+    }
+    seen.add(normalized);
+    toInsert.push(item);
+  });
+
+  return { toInsert, added: toInsert.length, skipped };
+}
