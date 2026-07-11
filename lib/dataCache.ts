@@ -26,3 +26,10 @@ export function setCache<T>(key: string, data: T) {
   if (typeof window === 'undefined') return;
   try { sessionStorage.setItem(storageKey(key), JSON.stringify(data)); } catch {}
 }
+
+// 캐시 키를 한 곳에 모아둔다 — 전체 목록(useKeywords/useExams)과 홈 화면 요약
+// (useStudySummary)이 같은 사용자+과목 변경 시 서로 어긋나지 않게 하기 위함.
+export const keywordsCacheKey = (userId: string, subjectId: string) => `kw:${userId}:${subjectId}`;
+export const keywordIdsCacheKey = (userId: string, subjectId: string) => `kwids:${userId}:${subjectId}`;
+export const examsCacheKey = (userId: string, subjectId: string) => `ex:${userId}:${subjectId}`;
+export const examCountCacheKey = (userId: string, subjectId: string) => `excount:${userId}:${subjectId}`;

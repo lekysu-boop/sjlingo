@@ -4,26 +4,23 @@ import { useRouter } from 'next/navigation';
 import { useSession } from '@/hooks/useSession';
 import { useUser } from '@/hooks/useUser';
 import { useSubjects } from '@/hooks/useSubjects';
-import { useKeywords } from '@/hooks/useKeywords';
-import { useExams } from '@/hooks/useExams';
+import { useStudySummary } from '@/hooks/useStudySummary';
 import { useGamification } from '@/hooks/useGamification';
 import { GamifyStyles, Confetti } from '@/components/Gamify';
 import { TabBar } from '@/components/TabBar';
 import { DAILY_QUESTS, loadQuestDay, markClaimed, questProgress, type QuestDay } from '@/lib/quests';
-import { loadSrs, dueItems } from '@/lib/srs';
 import { claimQuest } from '@/lib/api';
 import { playChest } from '@/lib/sound';
 
 // 홈: 과목 선택 + 오늘의 퀘스트 + 두 학습 프로그램 진입.
-// 이 컴포넌트는 업무 로직을 직접 계산하기보다 useSubjects/useKeywords/useExams/
+// 이 컴포넌트는 업무 로직을 직접 계산하기보다 useSubjects/useStudySummary/
 // useGamification 훅의 결과를 조립하는 Dashboard(View) 역할을 합니다.
 export default function HomePage() {
   const router = useRouter();
   const { userId, subjectId, setUserId, setSubjectId } = useSession();
   const { users } = useUser();
   const { subjects, currentId, setCurrentId, add } = useSubjects(userId, subjectId);
-  const kw = useKeywords(userId, subjectId);
-  const ex = useExams(userId, subjectId);
+  const summary = useStudySummary(userId, subjectId);
   const gam = useGamification(userId);
 
   // 일일 퀘스트 진행도(localStorage)와 보물상자 연출 상태.
@@ -32,14 +29,12 @@ export default function HomePage() {
   const [questOpen, setQuestOpen] = useState(false); // 퀘스트 상세 펼침 (기본: 접힘)
   const [chest, setChest] = useState<{ tier: string; coins: number } | null>(null);
   const [claiming, setClaiming] = useState(false);
-  const [dueCount, setDueCount] = useState(0); // 망각곡선상 오늘 복습할 키워드 수
 
   // 로그인 안 됐으면 로그인으로
   useEffect(() => { if (userId === null) router.replace('/'); }, [userId, router]);
   // 과목 훅의 선택을 세션에 동기화
   useEffect(() => { if (currentId && currentId !== subjectId) setSubjectId(currentId); }, [currentId]); // eslint-disable-line
   useEffect(() => { setQuestDay(loadQuestDay(userId)); }, [userId]);
-  useEffect(() => { setDueCount(dueItems(kw.items, loadSrs(userId, subjectId)).length); }, [kw.items, userId, subjectId]);
 
   const me = users.find((u) => u.id === userId);
   const todayXp = gam.state?.todayXp ?? 0;
@@ -150,8 +145,8 @@ export default function HomePage() {
           </div>
           <div style={{ fontSize: 14.5, opacity: .92, marginTop: 4, lineHeight: 1.5 }}>키워드를 보고 뜻과 원리를 떠올리는 인출 반복 훈련</div>
           <div style={{ display: 'flex', gap: 7, marginTop: 14 }}>
-            <Stat>📚 {kw.items.length}개</Stat>
-            {dueCount > 0 && <Stat>🧠 오늘 복습 {dueCount}개</Stat>}
+            <Stat>📚 {summary.kwCount}개</Stat>
+            {summary.dueCount > 0 && <Stat>🧠 오늘 복습 {summary.dueCount}개</Stat>}
           </div>
         </button>
 
@@ -164,7 +159,7 @@ export default function HomePage() {
           </div>
           <div style={{ fontSize: 14.5, opacity: .92, marginTop: 4, lineHeight: 1.5 }}>분류별 기출을 반복해서 풀고 자주 틀리는 문제만 집중 공략</div>
           <div style={{ display: 'flex', gap: 7, marginTop: 14 }}>
-            <Stat>📝 {ex.items.length}문항</Stat>
+            <Stat>📝 {summary.exCount}문항</Stat>
           </div>
         </button>
 

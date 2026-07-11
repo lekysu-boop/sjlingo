@@ -11,16 +11,19 @@ export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 
 // GET /api/keywords?userId=&subjectId= — 키워드 목록
+// fields=id 이면 id 컬럼만 반환 (개념/원리 같은 무거운 텍스트를 안 내려받아도 되는
+// 홈 화면의 "등록 개수/오늘 복습" 계산용 — lib/api.ts listKeywordIds 참고)
 export async function GET(req: NextRequest) {
   const userId = req.nextUrl.searchParams.get('userId');
   const subjectId = req.nextUrl.searchParams.get('subjectId');
+  const fields = req.nextUrl.searchParams.get('fields');
   if (!userId || !subjectId)
     return NextResponse.json({ error: 'userId, subjectId 필요' }, { status: 400 });
 
   const db = createAdminClient();
   const { data, error } = await db
     .from('keywords')
-    .select('*')
+    .select(fields === 'id' ? 'id' : '*')
     .eq('owner_id', userId)
     .eq('subject_id', subjectId)
     .order('created_at', { ascending: true });

@@ -24,6 +24,9 @@ export const createSubject = (body: { userId: string; name: string; emoji: strin
 // ---- 키워드 ----
 export const listKeywords = (userId: string, subjectId: string) =>
   fetch(`/api/keywords?userId=${userId}&subjectId=${subjectId}`).then(j<Keyword[]>);
+// 홈 화면의 "등록 개수/오늘 복습" 계산용 — id만 받아 트래픽을 줄인다.
+export const listKeywordIds = (userId: string, subjectId: string) =>
+  fetch(`/api/keywords?userId=${userId}&subjectId=${subjectId}&fields=id`).then(j<{ id: string }[]>);
 export const addKeywords = (userId: string, subjectId: string, items: KeywordInput[]) =>
   fetch('/api/keywords', { method: 'POST', body: JSON.stringify({ userId, subjectId, items }) })
     .then(j<{ added: number; skipped: number }>);
@@ -38,6 +41,9 @@ export const deleteAllKeywords = (userId: string, subjectId: string) =>
 // ---- 기출 ----
 export const listExams = (userId: string, subjectId: string) =>
   fetch(`/api/exams?userId=${userId}&subjectId=${subjectId}`).then(j<ExamQuestion[]>);
+// 홈 화면의 "등록 문항 수" 표시용 — 해설 등 본문 없이 개수만 받는다.
+export const countExams = (userId: string, subjectId: string) =>
+  fetch(`/api/exams?userId=${userId}&subjectId=${subjectId}&count=1`).then(j<{ count: number }>);
 export const addExams = (userId: string, subjectId: string, items: ExamInput[]) =>
   fetch('/api/exams', { method: 'POST', body: JSON.stringify({ userId, subjectId, items }) })
     .then(j<{ added: number; skipped: number }>);

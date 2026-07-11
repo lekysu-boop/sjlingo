@@ -2,9 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import type { ExamQuestion } from '@/lib/types';
 import { listExams } from '@/lib/api';
-import { getCache, setCache } from '@/lib/dataCache';
-
-const cacheKey = (userId: string, subjectId: string) => `ex:${userId}:${subjectId}`;
+import { getCache, setCache, examsCacheKey as cacheKey, examCountCacheKey } from '@/lib/dataCache';
 
 // 선택된 사용자+과목의 기출문제 목록 + 학습범위(era) 동적 추출.
 export function useExams(userId: string | null, subjectId: string | null) {
@@ -19,6 +17,8 @@ export function useExams(userId: string | null, subjectId: string | null) {
     try {
       const data = await listExams(userId, subjectId);
       setCache(cacheKey(userId, subjectId), data);
+      // 홈 화면 요약(useStudySummary)이 참조하는 개수 캐시도 같이 최신화한다.
+      setCache(examCountCacheKey(userId, subjectId), data.length);
       setItems(data);
     } finally {
       setLoading(false);

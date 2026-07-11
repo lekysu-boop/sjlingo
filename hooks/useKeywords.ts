@@ -2,9 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import type { Keyword } from '@/lib/types'; // "import type" = 타입만 가져옴 (실행 코드에는 안 남음)
 import { listKeywords } from '@/lib/api';
-import { getCache, setCache } from '@/lib/dataCache';
-
-const cacheKey = (userId: string, subjectId: string) => `kw:${userId}:${subjectId}`;
+import { getCache, setCache, keywordsCacheKey as cacheKey, keywordIdsCacheKey } from '@/lib/dataCache';
 
 // ----------------------------------------------------------------------------
 //  useKeywords — 선택된 사용자+과목의 키워드 목록을 서버에서 불러오는 커스텀 훅
@@ -27,6 +25,9 @@ export function useKeywords(userId: string | null, subjectId: string | null) {
     try {
       const data = await listKeywords(userId, subjectId);
       setCache(cacheKey(userId, subjectId), data);
+      // 홈 화면 요약(useStudySummary)이 참조하는 id 캐시도 같이 최신화해
+      // 별도 재조회 없이 등록 개수·오늘 복습 개수가 즉시 맞아떨어지게 한다.
+      setCache(keywordIdsCacheKey(userId, subjectId), data.map((k) => k.id));
       setItems(data);
     } finally {
       setLoading(false);

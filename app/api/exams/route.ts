@@ -10,14 +10,28 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 
-// GET /api/exams?userId=&subjectId=
+// GET /api/exams?userId=&subjectId= — 기출문제 목록
+// count=1 이면 문항을 전혀 내려받지 않고 개수만 반환 (해설 텍스트가 길어서, 홈 화면처럼
+// 개수만 필요한 곳에서 전체를 받아오지 않도록 함 — lib/api.ts countExams 참고)
 export async function GET(req: NextRequest) {
   const userId = req.nextUrl.searchParams.get('userId');
   const subjectId = req.nextUrl.searchParams.get('subjectId');
+  const countOnly = req.nextUrl.searchParams.get('count') === '1';
   if (!userId || !subjectId)
     return NextResponse.json({ error: 'userId, subjectId 필요' }, { status: 400 });
 
   const db = createAdminClient();
+
+  if (countOnly) {
+    const { count, error } = await db
+      .from('exam_questions')
+      .select('*', { count: 'exact', head: true })
+      .eq('owner_id', userId)
+      .eq('subject_id', subjectId);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ count: count ?? 0 });
+  }
+
   const { data, error } = await db
     .from('exam_questions')
     .select('*')
