@@ -26,5 +26,9 @@ export function parseQuestionDisplay(raw: string): { meta: string; image: string
     }
   }
 
+  // 원본 시트 지문 앞에 문항번호가 그대로 남아있는 경우(예: "46. (가) ...")가 있다.
+  // 화면에는 세션에서 실제로 푸는 순서 번호만 붙이므로 원본 번호는 제거한다.
+  text = text.replace(/^\d{1,3}[.)]\s+/, '');
+
   return { meta, image, text: text.replace(/\*\*/g, '') };
 }

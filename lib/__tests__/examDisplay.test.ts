@@ -13,4 +13,8 @@ describe('parseQuestionDisplay', () => {
   it('일반 대괄호로 시작하는 지문은 회차 메타로 오인하지 않는다', () => {
     expect(parseQuestionDisplay('[보기]에 해당하는 사실은?').text).toBe('[보기]에 해당하는 사실은?');
   });
+
+  it('지문 앞에 남아있는 원본 문항번호를 제거한다 (화면은 세션 순서 번호를 따로 붙임)', () => {
+    expect(parseQuestionDisplay('46. (가) 정부 시기의 경제 상황으로 옳은 것은?').text).toBe('(가) 정부 시기의 경제 상황으로 옳은 것은?');
+  });
 });

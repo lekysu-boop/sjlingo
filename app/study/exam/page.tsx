@@ -20,7 +20,7 @@ import type { ExamQuestion } from '@/lib/types';
 
 type Phase = 'setup' | 'session' | 'done';
 const NUMS = ['①', '②', '③', '④', '⑤'];
-const MAX_HEARTS = 10;
+const MAX_HEARTS = 5;
 
 // ============================================================================
 //  PROGRAM 2: 기출문제 풀이
@@ -274,33 +274,60 @@ export default function ExamStudyPage() {
           <div ref={topRef} style={{ position: 'absolute', top: -90 }} />
           <Confetti trigger={gam.fx.kind === 'correct' ? gam.fx.seq : 0} count={16} />
           <XpFloat trigger={gam.fx.kind === 'correct' ? gam.fx.seq : 0} amount={gam.fx.gainedXp ?? 0} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ flex: 1, height: 10, background: '#e2e8f0', borderRadius: 99, overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: `${(idx / deck.length) * 100}%`, background: 'linear-gradient(90deg,#8b5cf6,#6d28d9)', borderRadius: 99 }} />
+          {/* 진행률~문제 지문까지를 한 덩어리로 묶어, 정답/오답 오버레이가 이 영역만
+              정확히 덮도록 한다 (아래 보기 목록은 항상 그대로 보임). */}
+          <div style={{ position: 'relative' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ flex: 1, height: 10, background: '#e2e8f0', borderRadius: 99, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${(idx / deck.length) * 100}%`, background: 'linear-gradient(90deg,#8b5cf6,#6d28d9)', borderRadius: 99 }} />
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 900, color: '#334155' }}>{idx + 1}/{deck.length}</span>
             </div>
-            <span style={{ fontSize: 13, fontWeight: 900, color: '#334155' }}>{idx + 1}/{deck.length}</span>
-          </div>
-          <div style={{ display: 'flex', gap: 8, margin: '10px 0' }}>
-            <span style={{ flex: 1, textAlign: 'center', background: '#dcfce7', color: '#16a34a', borderRadius: 12, padding: 8, fontWeight: 800, fontSize: 13 }}>✅ 정답 {correct}</span>
-            <span style={{ flex: 1, textAlign: 'center', background: '#fee2e2', color: '#dc2626', borderRadius: 12, padding: 8, fontWeight: 800, fontSize: 13 }}>❌ 오답 {wrong}</span>
-          </div>
-          <ComboBadge combo={combo} />
-          <Mascot kind={gam.fx.kind} seq={gam.fx.seq} combo={combo} wrongStreak={wrongStreak} emoji="🦉" />
 
-          {/* 시대 + 회차 메타(예: 57회 심화 1번 / 1점) 뱃지 */}
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', margin: '10px 0 10px' }}>
-            <span style={{ background: '#f3e8ff', color: '#7c3aed', fontWeight: 800, fontSize: 12, padding: '6px 13px', borderRadius: 99 }}>{q.era}</span>
-            {qp.meta && <span style={{ background: '#fef9c3', color: '#a16207', fontWeight: 800, fontSize: 12, padding: '6px 13px', borderRadius: 99 }}>📋 {qp.meta}</span>}
-            <span style={{ color: '#f59e0b', fontWeight: 900, fontSize: 13, letterSpacing: 1 }}>{'★'.repeat(q.importance ?? 2)}</span>
-          </div>
-          {/* [이미지: ...] 표기는 실제 사진 대신 자료 설명 상자로 보여준다 */}
-          {qp.image && (
-            <div style={{ background: '#f8fafc', border: '1.5px dashed #cbd5e1', borderRadius: 14, padding: '12px 14px', marginBottom: 10, fontSize: 12.5, fontWeight: 700, color: '#64748b', lineHeight: 1.5 }}>🖼️ 제시 자료 · {qp.image}</div>
-          )}
-          {/* 지문이 길면(샘플 기준 최대 109자) 글자를 한 단계 줄여 화면을 아낀다 */}
-          <div style={{ fontSize: qp.text.length > 60 ? 17 : 19, fontWeight: 800, color: '#0f172a', lineHeight: 1.6, marginBottom: 14, wordBreak: 'keep-all' }}>Q. {qp.text}</div>
+            {/* 마스코트와 정답/오답 카운트를 한 줄로 압축해 상단 높이를 아낀다 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '8px 0' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <Mascot kind={gam.fx.kind} seq={gam.fx.seq} combo={combo} wrongStreak={wrongStreak} emoji="🦉" />
+              </div>
+              <span style={{ flexShrink: 0, background: '#dcfce7', color: '#16a34a', borderRadius: 10, padding: '6px 11px', fontWeight: 800, fontSize: 12.5 }}>✅ {correct}</span>
+              <span style={{ flexShrink: 0, background: '#fee2e2', color: '#dc2626', borderRadius: 10, padding: '6px 11px', fontWeight: 800, fontSize: 12.5 }}>❌ {wrong}</span>
+            </div>
+            <ComboBadge combo={combo} />
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+            {/* [이미지: ...] 표기는 실제 사진 대신 자료 설명 상자로 보여준다 */}
+            {qp.image && (
+              <div style={{ background: '#f8fafc', border: '1.5px dashed #cbd5e1', borderRadius: 14, padding: '12px 14px', marginBottom: 10, fontSize: 12.5, fontWeight: 700, color: '#64748b', lineHeight: 1.5 }}>🖼️ 제시 자료 · {qp.image}</div>
+            )}
+            {/* 시대·중요도·회차 메타를 문제 번호 앞에 배지로 붙여 별도 줄 없이 공간을 아낀다.
+                문항번호는 원본 데이터 대신 이번 세션에서 푸는 순서(Q{idx+1})를 쓴다.
+                글자 크기도 지문 길이에 맞춰 계단식으로 조절한다. */}
+            <div style={{ fontWeight: 800, color: '#0f172a', lineHeight: 1.6, wordBreak: 'keep-all' }}>
+              <span style={{ fontSize: 12, fontWeight: 800, color: '#7c3aed', background: '#f3e8ff', padding: '3px 9px', borderRadius: 99, marginRight: 6, display: 'inline-block' }}>{q.era}</span>
+              <span style={{ fontSize: 13, fontWeight: 900, color: '#f59e0b', letterSpacing: 1, marginRight: 6 }}>{'★'.repeat(q.importance ?? 2)}</span>
+              {qp.meta && <span style={{ fontSize: 12, fontWeight: 800, color: '#a16207', background: '#fef9c3', padding: '3px 9px', borderRadius: 99, marginRight: 6, display: 'inline-block' }}>📋 {qp.meta}</span>}
+              <span style={{ fontSize: fitFont(qp.text.length, [[30, 21], [50, 19], [70, 18], [90, 17]], 16) }}>Q{idx + 1}. {qp.text}</span>
+            </div>
+
+            {/* 정답/오답 피드백 — 진행률~지문 영역을 정확히 덮는 오버레이로 띄워서
+                문제·보기 레이아웃을 아래로 밀어내지 않는다. */}
+            {pick !== null && (
+              <div style={{ position: 'absolute', inset: 0, zIndex: 20, display: 'flex', animation: 'gm-pop .25s ease' }}>
+                <div style={{ width: '100%', background: isRight ? '#dcfce7' : '#fef2f2', borderRadius: 16, padding: 15, boxShadow: '0 16px 34px -14px rgba(15,23,42,.4)', overflow: 'auto' }}>
+                  <div style={{ fontSize: 13, fontWeight: 900, color: isRight ? '#16a34a' : '#dc2626', marginBottom: 5 }}>{isRight ? '✅ 정답이에요!' : '❌ 오답 · 복습함에 추가됐어요'}</div>
+                  {/* 해설이 길어(샘플 평균 490자) 상자 안에서만 스크롤되게 하고,
+                      **굵게** 마크와 줄바꿈을 살려 읽기 편하게 렌더링 */}
+                  {q.explain && (
+                    <div style={{ fontSize: 14, color: '#334155', fontWeight: 500, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'keep-all', background: 'rgba(255,255,255,.65)', borderRadius: 11, padding: '11px 13px' }}>
+                      <Bold text={q.explain} />
+                    </div>
+                  )}
+                  <button onClick={next} style={{ marginTop: 12, width: '100%', background: '#7c3aed', color: '#fff', border: 'none', fontWeight: 900, fontSize: 15, padding: 13, borderRadius: 14, cursor: 'pointer' }}>{isLast ? '결과 보기 →' : '다음 문제 →'}</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 9 }}>
             {q.options.map((o, i) => {
               let bg = '#fff', border = '#e2e8f0', color = '#0f172a', mark = '';
               if (pick !== null) {
@@ -317,20 +344,6 @@ export default function ExamStudyPage() {
               );
             })}
           </div>
-
-          {pick !== null && (
-            <div style={{ marginTop: 16, background: isRight ? '#dcfce7' : '#fef2f2', borderRadius: 16, padding: 15 }}>
-              <div style={{ fontSize: 13, fontWeight: 900, color: isRight ? '#16a34a' : '#dc2626', marginBottom: 5 }}>{isRight ? '✅ 정답이에요!' : '❌ 오답 · 복습함에 추가됐어요'}</div>
-              {/* 해설이 길어(샘플 평균 490자) 상자 안에서만 스크롤되게 하고,
-                  **굵게** 마크와 줄바꿈을 살려 읽기 편하게 렌더링 */}
-              {q.explain && (
-                <div style={{ fontSize: 14.5, color: '#334155', fontWeight: 500, lineHeight: 1.65, whiteSpace: 'pre-wrap', wordBreak: 'keep-all', maxHeight: 260, overflow: 'auto', background: 'rgba(255,255,255,.65)', borderRadius: 11, padding: '11px 13px' }}>
-                  <Bold text={q.explain} />
-                </div>
-              )}
-              <button onClick={next} style={{ marginTop: 12, width: '100%', background: '#7c3aed', color: '#fff', border: 'none', fontWeight: 900, fontSize: 15, padding: 13, borderRadius: 14, cursor: 'pointer' }}>{isLast ? '결과 보기 →' : '다음 문제 →'}</button>
-            </div>
-          )}
         </div>
       )}
 
@@ -388,6 +401,13 @@ export default function ExamStudyPage() {
 const Bold = ({ text }: { text: string }) => (
   <>{text.split('**').map((seg, i) => (i % 2 ? <b key={i}>{seg}</b> : seg))}</>
 );
+
+// 글자 수에 따라 폰트 크기를 계단식으로 결정.
+// steps: [최대 글자 수, 폰트 크기] 목록 (오름차순). 모두 초과하면 min 사용.
+function fitFont(len: number, steps: [number, number][], min: number): number {
+  for (const [maxLen, size] of steps) if (len <= maxLen) return size;
+  return min;
+}
 
 // 기출문제가 하나도 없을 때: 데이터 관리 화면으로 나가지 않고 그 자리에서 바로
 // 기본 데이터를 물어보고 적재한다. 한국사는 기본/심화를 고르게 하고, 영어 단어는
