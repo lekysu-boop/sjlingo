@@ -308,20 +308,23 @@ export default function ExamStudyPage() {
               <span style={{ fontSize: fitFont(qp.text.length, [[30, 21], [50, 19], [70, 18], [90, 17]], 16) }}>Q{idx + 1}. {qp.text}</span>
             </div>
 
-            {/* 정답/오답 피드백 — 진행률~지문 영역을 정확히 덮는 오버레이로 띄워서
-                문제·보기 레이아웃을 아래로 밀어내지 않는다. */}
+            {/* 정답/오답 피드백 — 진행률~지문 영역 위에 오버레이로 띄워서 문제·보기
+                레이아웃을 아래로 밀어내지 않는다. 카드 전체를 스크롤시키면 버튼까지
+                작아지고 눌리지 않으므로, 해설 글 상자만 자체적으로 스크롤되게 하고
+                제목·버튼은 항상 원래 크기로 보이게 한다. 지문 영역보다 내용이 길면
+                카드가 자연스럽게 더 길어져 보기 목록 위로 살짝 덮인다(과도기 상태라 무방). */}
             {pick !== null && (
-              <div style={{ position: 'absolute', inset: 0, zIndex: 20, display: 'flex', animation: 'gm-pop .25s ease' }}>
-                <div style={{ width: '100%', background: isRight ? '#dcfce7' : '#fef2f2', borderRadius: 16, padding: 15, boxShadow: '0 16px 34px -14px rgba(15,23,42,.4)', overflow: 'auto' }}>
-                  <div style={{ fontSize: 13, fontWeight: 900, color: isRight ? '#16a34a' : '#dc2626', marginBottom: 5 }}>{isRight ? '✅ 정답이에요!' : '❌ 오답 · 복습함에 추가됐어요'}</div>
-                  {/* 해설이 길어(샘플 평균 490자) 상자 안에서만 스크롤되게 하고,
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, minHeight: '100%', zIndex: 20, animation: 'gm-pop .25s ease' }}>
+                <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', background: isRight ? '#dcfce7' : '#fef2f2', borderRadius: 16, padding: 15, boxShadow: '0 16px 34px -14px rgba(15,23,42,.4)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 900, color: isRight ? '#16a34a' : '#dc2626', marginBottom: 6 }}>{isRight ? '✅ 정답이에요!' : '❌ 오답 · 복습함에 추가됐어요'}</div>
+                  {/* 해설이 길어(샘플 평균 490자) 이 상자 안에서만 스크롤되게 하고,
                       **굵게** 마크와 줄바꿈을 살려 읽기 편하게 렌더링 */}
                   {q.explain && (
-                    <div style={{ fontSize: 14, color: '#334155', fontWeight: 500, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'keep-all', background: 'rgba(255,255,255,.65)', borderRadius: 11, padding: '11px 13px' }}>
+                    <div style={{ fontSize: 14, color: '#334155', fontWeight: 500, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'keep-all', maxHeight: 240, overflow: 'auto', background: 'rgba(255,255,255,.65)', borderRadius: 11, padding: '11px 13px' }}>
                       <Bold text={q.explain} />
                     </div>
                   )}
-                  <button onClick={next} style={{ marginTop: 12, width: '100%', background: '#7c3aed', color: '#fff', border: 'none', fontWeight: 900, fontSize: 15, padding: 13, borderRadius: 14, cursor: 'pointer' }}>{isLast ? '결과 보기 →' : '다음 문제 →'}</button>
+                  <button onClick={next} style={{ marginTop: 12, width: '100%', background: '#7c3aed', color: '#fff', border: 'none', fontWeight: 900, fontSize: 15, padding: 14, borderRadius: 14, cursor: 'pointer', flexShrink: 0 }}>{isLast ? '결과 보기 →' : '다음 문제 →'}</button>
                 </div>
               </div>
             )}
