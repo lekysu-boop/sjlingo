@@ -20,6 +20,7 @@ import type { ExamQuestion } from '@/lib/types';
 
 type Phase = 'setup' | 'session' | 'done';
 const NUMS = ['①', '②', '③', '④', '⑤'];
+const MAX_HEARTS = 10;
 
 // ============================================================================
 //  PROGRAM 2: 기출문제 풀이
@@ -76,8 +77,11 @@ export default function ExamStudyPage() {
   );
   const dataLoading = examsLoading || (isEnglishWord && kw.loading);
   const eraCounts = useMemo(() => {
-    const counts = new Map<string, number>([['전체', items.length]]);
+    const counts = new Map<string, number>();
     items.forEach((item) => counts.set(item.era, (counts.get(item.era) ?? 0) + 1));
+    // 실제 시트 데이터에 "전체"라는 분류값이 섞여 있어도(예: 요약 행) 등록 개수와
+    // 어긋나지 않도록 항상 마지막에 실제 전체 개수로 덮어쓴다.
+    counts.set('전체', items.length);
     return counts;
   }, [items]);
 
@@ -93,11 +97,12 @@ export default function ExamStudyPage() {
   const [wrong, setWrong] = useState(0);
   const [combo, setCombo] = useState(0);
   const [wrongStreak, setWrongStreak] = useState(0); // 연속 오답 수 (마스코트 위로 메시지용)
-  // 세션 하트: 학습을 시작할 때마다 5개로 리셋, 틀리면 1개 소모. 0이면 세션 종료.
-  const [hearts, setHearts] = useState(5);
+  // 세션 하트: 학습을 시작할 때마다 10개로 리셋, 틀리면 1개 소모(0 밑으로는 내려가지 않음).
+  // 다 떨어져도 세션은 끝나지 않고 계속 풀 수 있다 — 순수 피드백용 표시.
+  const [hearts, setHearts] = useState(MAX_HEARTS);
   const [heartBreak, setHeartBreak] = useState<number | null>(null);
-  const [endedByHearts, setEndedByHearts] = useState(false);
   const [earnedCoins, setEarnedCoins] = useState(0); // 이번 세션 공부시간 코인
+  const [missed, setMissed] = useState<ExamQuestion[]>([]); // 결과 화면에서 오답 복기용
   const [sound, setSound] = useState(true);
   const topRef = useRef<HTMLDivElement>(null);
   const startedAt = useRef(0); // 세션 시작 시각 (공부시간 계산용)
@@ -138,22 +143,22 @@ export default function ExamStudyPage() {
     // 보기 순서를 섞어 정답 위치를 세션 전체에 고르게 분산
     const pool = balanceAnswers(result.picked);
     setDeck(pool); setIdx(0); setPick(null); setCorrect(0); setWrong(0); setCombo(0); setWrongStreak(0);
-    setHearts(5); setEndedByHearts(false); setEarnedCoins(0); // 세션 하트 리셋
+    setHearts(MAX_HEARTS); setMissed([]); setEarnedCoins(0); // 세션 하트 리셋
     startedAt.current = Date.now();
     setPhase('session');
   }
 
-  // 세션 종료 공통 처리: 스트릭·시간 코인·퀘스트·통계 기록
-  function finishSession(finalCorrect: number, attempted: number, byHearts: boolean) {
+  // 세션 종료 공통 처리: 스트릭·시간 코인·퀘스트·통계 기록. 하트가 다 떨어져도 끝까지
+  // 풀 수 있으므로, 세션은 항상 deck을 전부 풀었을 때만 끝난다.
+  function finishSession(finalCorrect: number) {
     const durationSec = Math.round((Date.now() - startedAt.current) / 1000);
-    setEndedByHearts(byHearts);
     setPhase('done');
     gam.completeSession(durationSec / 60).then((r) => setEarnedCoins(r?.gainedCoins ?? 0));
     bumpQuestSession(userId);
     playFinish();
     // 세션 결과 기록 → 통계(공부시간·가중평균)와 리그 순위의 원천
     if (userId && subjectId) {
-      recordSession({ userId, subjectId, kind: 'ex', total: attempted, correct: finalCorrect, durationSec }).catch(() => {});
+      recordSession({ userId, subjectId, kind: 'ex', total: deck.length, correct: finalCorrect, durationSec }).catch(() => {});
       // 오답 목록 갱신 (이번 세션에서 맞힌 오답은 목록에서 빠짐)
       wrongExamIds(userId).then((r) => setWrongIds(new Set(r.wrongIds))).catch(() => {});
     }
@@ -171,12 +176,14 @@ export default function ExamStudyPage() {
       c >= 3 ? playCombo() : playCorrect();
     } else {
       setWrongStreak((w) => w + 1);
-      // 세션 하트 1개 소모 + 깨지는 애니메이션 (해설은 보여준 뒤 next 에서 종료 판단)
-      const left = hearts - 1;
+      // 세션 하트 1개 소모(0 밑으로는 안 내려감) + 깨지는 애니메이션. 하트가 다
+      // 떨어져도 세션을 막지 않고 계속 풀 수 있다 — 순수 피드백용.
+      const left = Math.max(0, hearts - 1);
       setHearts(left);
       setHeartBreak(left);
       setTimeout(() => setHeartBreak(null), 600);
       setWrong((n) => n + 1); setCombo(0); gam.onWrong();
+      setMissed((m) => [...m, q]); // 결과 화면 오답 복기용
       playWrong();
     }
     // 즉석 생성 문제는 DB에 없는 id라 exam_attempts FK를 만족하지 못하므로 기록하지 않는다.
@@ -184,10 +191,8 @@ export default function ExamStudyPage() {
   }
 
   function next() {
-    if (hearts <= 0) {
-      finishSession(correct, idx + 1, true); // 하트 소진 → 여기까지 푼 것만 기록
-    } else if (idx + 1 >= deck.length) {
-      finishSession(correct, deck.length, false);
+    if (idx + 1 >= deck.length) {
+      finishSession(correct);
     } else { setIdx(idx + 1); setPick(null); }
   }
 
@@ -210,7 +215,7 @@ export default function ExamStudyPage() {
         </div>
         <button onClick={() => setSound(toggleSound())} style={iconBtn} title="효과음 켜기/끄기">{sound ? '🔊' : '🔇'}</button>
       </div>
-      {phase === 'session' && <div style={{ marginBottom: 14 }}><GamifyHud state={gam.state} hearts={hearts} heartBreakIdx={heartBreak} /></div>}
+      {phase === 'session' && <div style={{ marginBottom: 14 }}><GamifyHud state={gam.state} hearts={hearts} maxHearts={MAX_HEARTS} heartBreakIdx={heartBreak} /></div>}
 
       {phase === 'setup' && loadDoneMsg && (
         <div aria-live="polite" style={{ marginBottom: 14, fontSize: 12.5, fontWeight: 800, color: loadDoneMsg.startsWith('⚠️') ? '#dc2626' : '#16a34a', background: loadDoneMsg.startsWith('⚠️') ? '#fef2f2' : '#dcfce7', padding: '10px 12px', borderRadius: 11 }}>{loadDoneMsg}</div>
@@ -323,7 +328,7 @@ export default function ExamStudyPage() {
                   <Bold text={q.explain} />
                 </div>
               )}
-              <button onClick={next} style={{ marginTop: 12, width: '100%', background: '#7c3aed', color: '#fff', border: 'none', fontWeight: 900, fontSize: 15, padding: 13, borderRadius: 14, cursor: 'pointer' }}>{hearts <= 0 ? '💔 하트 소진 · 결과 보기 →' : isLast ? '결과 보기 →' : '다음 문제 →'}</button>
+              <button onClick={next} style={{ marginTop: 12, width: '100%', background: '#7c3aed', color: '#fff', border: 'none', fontWeight: 900, fontSize: 15, padding: 13, borderRadius: 14, cursor: 'pointer' }}>{isLast ? '결과 보기 →' : '다음 문제 →'}</button>
             </div>
           )}
         </div>
@@ -332,15 +337,38 @@ export default function ExamStudyPage() {
       {phase === 'done' && (
         <div style={{ ...resultCard, position: 'relative', overflow: 'hidden' }}>
           <Confetti trigger={1} count={28} loop />
-          <div style={{ fontSize: 44, animation: 'gm-jump 1.3s ease-in-out infinite', zIndex: 1 }}>{endedByHearts ? '💔' : '🏆'}</div>
-          <div style={{ fontSize: 22, fontWeight: 900, color: '#0f172a', zIndex: 1 }}>{endedByHearts ? '하트를 다 썼어요!' : '기출 풀이 완료!'}</div>
-          {endedByHearts && <div style={{ fontSize: 13, fontWeight: 700, color: '#94a3b8', zIndex: 1 }}>조금 쉬었다가 다시 도전해요 💪 (푼 만큼은 기록됐어요)</div>}
+          <div style={{ fontSize: 44, animation: 'gm-jump 1.3s ease-in-out infinite', zIndex: 1 }}>🏆</div>
+          <div style={{ fontSize: 22, fontWeight: 900, color: '#0f172a', zIndex: 1 }}>기출 풀이 완료!</div>
           <div style={{ fontSize: 15, fontWeight: 800, color: '#7c3aed', zIndex: 1 }}>정답률 {Math.round((correct / Math.max(1, correct + wrong)) * 100)}%</div>
           {gam.state && <div style={{ fontSize: 13.5, fontWeight: 800, color: '#ea580c', zIndex: 1 }}>🔥 {gam.state.streak}일 연속{earnedCoins > 0 ? ` · 🪙 +${earnedCoins} (공부시간 보상)` : ''}</div>}
           <div style={{ display: 'flex', gap: 12, margin: '10px 0', zIndex: 1 }}>
             <Score n={correct} label="정답" c="#16a34a" bg="#dcfce7" />
             <Score n={wrong} label="복습 대상" c="#dc2626" bg="#fee2e2" />
           </div>
+
+          {/* 틀린 문제 복기 — 문제를 간략히 보여주고 정답·해설로 바로 이어서 복습할 수 있게 한다 */}
+          {missed.length > 0 && (
+            <div style={{ alignSelf: 'stretch', width: '100%', textAlign: 'left', zIndex: 1 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 900, color: '#0f172a', marginBottom: 8 }}>❌ 틀린 문제 다시 보기 ({missed.length}개)</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 320, overflow: 'auto' }}>
+                {missed.map((mq, i) => {
+                  const mqp = parseQuestionDisplay(mq.question);
+                  return (
+                    <div key={`${mq.id}-${i}`} style={{ background: '#fef2f2', borderRadius: 14, padding: '11px 13px' }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: '#0f172a', lineHeight: 1.5, marginBottom: 4, wordBreak: 'keep-all' }}>Q. {mqp.text}</div>
+                      <div style={{ fontSize: 12.5, fontWeight: 800, color: '#16a34a', marginBottom: mq.explain ? 4 : 0 }}>정답: {mq.options[mq.answer]}</div>
+                      {mq.explain && (
+                        <div style={{ fontSize: 12, color: '#475569', fontWeight: 500, lineHeight: 1.55, wordBreak: 'keep-all' }}>
+                          <Bold text={mq.explain} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: 10, zIndex: 1 }}>
             <button onClick={() => setPhase('setup')} style={gray}>다시 설정</button>
             <button onClick={() => router.push('/home')} style={{ ...primary, width: undefined, flex: 1, fontSize: 14, padding: '13px 22px' }}>홈으로</button>

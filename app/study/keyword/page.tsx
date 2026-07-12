@@ -100,8 +100,11 @@ export default function KeywordStudyPage() {
   );
   const due = useMemo(() => dueItems(scoped, srsMap), [scoped, srsMap]);
   const eraCounts = useMemo(() => {
-    const counts = new Map<string, number>([['전체', items.length]]);
+    const counts = new Map<string, number>();
     items.forEach((item) => counts.set(item.era, (counts.get(item.era) ?? 0) + 1));
+    // 실제 시트 데이터에 "전체"라는 분류값이 섞여 있어도(예: 요약 행) 등록 개수와
+    // 어긋나지 않도록 항상 마지막에 실제 전체 개수로 덮어쓴다.
+    counts.set('전체', items.length);
     return counts;
   }, [items]);
 
