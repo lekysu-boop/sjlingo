@@ -192,8 +192,9 @@ export default function ExamStudyPage() {
   }
 
   const q = deck[idx];
-  // q.id에만 의존 — 하트 애니메이션 등 무관한 리렌더마다 정규식 파싱을 반복하지 않는다.
-  const qp = useMemo(() => (q ? parseQuestionDisplay(q.question) : null), [q?.id]);
+  // idx가 바뀔 때만 새 객체가 되는 q에 의존 — 하트 애니메이션 등 무관한 리렌더마다
+  // 정규식 파싱을 반복하지 않는다.
+  const qp = useMemo(() => (q ? parseQuestionDisplay(q.question) : null), [q]);
   const isRight = pick !== null && pick === q?.answer;
   const isLast = idx + 1 >= deck.length;
 

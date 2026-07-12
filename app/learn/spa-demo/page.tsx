@@ -121,7 +121,7 @@ export default function SpaDemoPage() {
   // --------------------------------------------------------------------------
   useEffect(() => {
     loadNotes();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --------------------------------------------------------------------------
   //  "메모 추가" 버튼 핸들러.
@@ -205,8 +205,8 @@ export default function SpaDemoPage() {
         <p style={p}>
           아래 버튼을 눌러보세요. 주소창의 새로고침 아이콘이 도는지 확인해보세요 — 돌지 않습니다.
           그런데도 숫자는 바뀝니다. 그 이유는 <b>setCount가 호출될 때마다 이 페이지를 그리는
-          SpaDemoPage 함수가 처음부터 다시 "실행"</b>되기 때문입니다. 그 증거로, 아래
-          "이 함수가 실행된 횟수"도 클릭할 때마다 같이 늘어납니다.
+          SpaDemoPage 함수가 처음부터 다시 &quot;실행&quot;</b>되기 때문입니다. 그 증거로, 아래
+          &quot;이 함수가 실행된 횟수&quot;도 클릭할 때마다 같이 늘어납니다.
         </p>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
           <button onClick={handleIncrement} style={btn}>클릭 {count}</button>
@@ -253,7 +253,7 @@ export default function SpaDemoPage() {
       <section style={box}>
         <h2 style={h2}>C. async/await/Promise 동작 순서 (실시간 로그)</h2>
         <p style={p}>
-          위 버튼들을 누르면 아래에 로그가 쌓입니다. "요청 시작"과 "응답 도착" 사이에
+          위 버튼들을 누르면 아래에 로그가 쌓입니다. &quot;요청 시작&quot;과 &quot;응답 도착&quot; 사이에
           시간차가 있는 걸 볼 수 있는데, 그 사이(await로 기다리는 동안)에도 섹션 A의
           카운터 버튼은 눌러도 즉시 반응합니다 — 브라우저가 멈추지 않는다는 뜻입니다.
         </p>
