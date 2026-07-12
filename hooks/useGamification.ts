@@ -57,5 +57,9 @@ export function useGamification(userId: string | null) {
     } catch { return null; }
   }, [userId]);
 
-  return { state, fx, refresh, onCorrect, onWrong, completeSession };
+  // 퀘스트 보상처럼 다른 API가 이미 최신 gamify_state를 응답에 담아 줄 때,
+  // 굳이 GET을 한 번 더 보내지 않고 그 값을 바로 반영한다.
+  const applyState = useCallback((next: GamifyState) => setState(next), []);
+
+  return { state, fx, refresh, applyState, onCorrect, onWrong, completeSession };
 }

@@ -1,23 +1,16 @@
 // 기본 샘플 데이터 (Supabase에 데이터가 없을 때 "기본데이터 넣기"로 주입)
 import type { KeywordInput, ExamInput } from './types';
 
-// 한국사 키워드는 작은 내장 샘플 대신 관리 중인 마스터 시트를 사용합니다.
-// gid=2484287은 문서 첫 탭(사용법)이 아니라 실제 674개 데이터가 있는
-// "한능검_암기코드_종합_마스터" 탭의 고유 id입니다.
+// 한국사 키워드는 작은 내장 샘플 대신 최종 통합본의 첫 탭(암기코드)을 사용합니다.
 export const KOREAN_HISTORY_KEYWORD_SHEET_URL =
-  'https://docs.google.com/spreadsheets/d/1hoa0tTf635b3R9CN8_99M9uyprXu0eyCy3ObxvAy5Po/edit?usp=sharing#gid=2484287';
+  'https://docs.google.com/spreadsheets/d/1O_f_xTbwFByE52a86pfNCAQbTIGofkcwmmfaCSdno2o/edit?usp=sharing';
 
-// 한국사 기출문제는 난이도별 소스를 분리합니다. 사용자가 제공한 URL 뒤에 실제
-// 데이터 탭 gid를 붙여 첫 번째 'TOC 및 사용법' 탭이 잘못 파싱되지 않게 합니다.
-// gid=1701503140은 'TOC 및 사용법' 안내 탭이 아니라 실제 문항이 있는
-// '한능검_기출_기본_정제' 탭의 고유 id입니다.
+// 한국사 기출문제는 난이도별 최종 통합본의 첫 탭(전체통합)을 사용합니다.
 export const KOREAN_HISTORY_BASIC_EXAM_SHEET_URL =
-  'https://docs.google.com/spreadsheets/d/1nb5gkJcjacVIvY1U2bVnZKnaDv6bCT_NNEM6IM-MpN0/edit?usp=sharing#gid=1701503140';
+  'https://docs.google.com/spreadsheets/d/1U1CjPfvykkcGrWTyt__RgCHMhuqSvlRygPtmoXCkafU/edit?usp=sharing';
 
-// gid=309850618은 'TOC 및 사용법' 안내 탭이 아니라 실제 문항이 있는
-// '한능검_기출_심화_정제' 탭의 고유 id입니다.
-export const KOREAN_HISTORY_ADVANCED_EXAM_SHEET_URL: string | null =
-  'https://docs.google.com/spreadsheets/d/1XeGq_LLoXL7y86PXY_lJFr26Y2y2RzVtkskU9r0Gzj8/edit?usp=sharing#gid=309850618';
+export const KOREAN_HISTORY_ADVANCED_EXAM_SHEET_URL =
+  'https://docs.google.com/spreadsheets/d/1lmQ3bFWvlQl7M8S0M9DBSf1TQlW2uGIQs2TElrToB2I/edit?usp=sharing';
 
 /** 사용자가 과목명을 조금 다르게 지어도 한국사 기본 소스를 선택합니다. */
 export function isKoreanHistorySubject(name?: string | null): boolean {

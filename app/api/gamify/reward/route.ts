@@ -57,18 +57,23 @@ export async function POST(req: NextRequest) {
   }
 
   data.updated_at = now.toISOString();
-  await db.from('gamify_state').update({
+  const updateState = db.from('gamify_state').update({
     streak: data.streak, last_active: data.last_active, total_xp: data.total_xp,
     today_xp: data.today_xp, today_date: data.today_date,
     coins: data.coins, updated_at: data.updated_at,
   }).eq('owner_id', userId);
 
-  // 주간 리그 점수 반영 (정답 XP만)
+  // 주간 리그 점수 반영 (정답 XP만) — gamify_state 갱신과 다른 테이블이라 병렬로 처리해 왕복을 줄인다.
   if (gainedXp > 0) {
     const ws = weekStart(now);
-    const { data: row } = await db.from('league_scores').select('xp').eq('owner_id', userId).eq('week_start', ws).maybeSingle();
+    const [, { data: row }] = await Promise.all([
+      updateState,
+      db.from('league_scores').select('xp').eq('owner_id', userId).eq('week_start', ws).maybeSingle(),
+    ]);
     const newXp = (row?.xp ?? 0) + gainedXp;
     await db.from('league_scores').upsert({ owner_id: userId, week_start: ws, xp: newXp }, { onConflict: 'owner_id,week_start' });
+  } else {
+    await updateState;
   }
 
   const result: RewardResult = { state: toState(data), gainedXp, gainedCoins, streakUp, leveledGoal };

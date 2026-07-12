@@ -8,6 +8,10 @@ interface SessionState {
   subjectId: string | null;
   setUserId: (id: string | null) => void;
   setSubjectId: (id: string | null) => void;
+  // localStorage 복원이 끝났는지. SSR/첫 렌더에는 항상 userId=null이라, 이 값을
+  // 확인하지 않고 "userId === null → 로그인으로" 리다이렉트하면 새로고침할 때마다
+  // 로그인 화면으로 튕겨나가는 문제가 생긴다 (복원되기 전 null을 "로그아웃"으로 오인).
+  ready: boolean;
 }
 
 const Ctx = createContext<SessionState | null>(null);
@@ -17,10 +21,12 @@ const LS_SUBJECT = 'amgi_current_subject';
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [userId, setUserIdState] = useState<string | null>(null);
   const [subjectId, setSubjectIdState] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     setUserIdState(localStorage.getItem(LS_USER));
     setSubjectIdState(localStorage.getItem(LS_SUBJECT));
+    setReady(true);
   }, []);
 
   const setUserId = (id: string | null) => {
@@ -32,7 +38,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setSubjectIdState(id);
   };
 
-  return <Ctx.Provider value={{ userId, subjectId, setUserId, setSubjectId }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ userId, subjectId, setUserId, setSubjectId, ready }}>{children}</Ctx.Provider>;
 }
 
 export function useSession() {

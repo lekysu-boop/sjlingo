@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from '@/hooks/useSession';
+import { useSubjects } from '@/hooks/useSubjects';
 import { useKeywords } from '@/hooks/useKeywords';
 import { useGamification } from '@/hooks/useGamification';
 import { recordKeyword, recordSession } from '@/lib/api';
@@ -11,6 +12,8 @@ import { pickRotating } from '@/lib/rotation';
 import { loadSrs, saveSrs, srsReview, dueItems, type SrsMap } from '@/lib/srs';
 import { bumpQuestSession, bumpQuestCombo } from '@/lib/quests';
 import { playCorrect, playCombo, playWrong, playFinish, isSoundOn, toggleSound } from '@/lib/sound';
+import { loadDefaultKeywords } from '@/lib/defaultDataLoad';
+import { isKoreanHistorySubject, isEnglishWordSubject } from '@/lib/defaultData';
 import type { Keyword } from '@/lib/types';
 
 type Phase = 'setup' | 'session' | 'done';
@@ -25,9 +28,40 @@ type Phase = 'setup' | 'session' | 'done';
 // ============================================================================
 export default function KeywordStudyPage() {
   const router = useRouter();
-  const { userId, subjectId } = useSession();
-  const { items, eras } = useKeywords(userId, subjectId);
+  const { userId, subjectId, ready } = useSession();
+  const { current: currentSubject } = useSubjects(userId, subjectId);
+  const { items, eras, loading, refresh: refreshKeywords } = useKeywords(userId, subjectId);
   const gam = useGamification(userId);
+
+  // 화면 진입 시 등록된 키워드가 하나도 없으면, 데이터 관리로 나가지 않고
+  // 이 자리에서 바로 기본 데이터를 불러올 수 있게 한다.
+  const [loadingDefault, setLoadingDefault] = useState(false);
+  const [loadDoneMsg, setLoadDoneMsg] = useState<string | null>(null);
+  const defaultKeywordLabel = isKoreanHistorySubject(currentSubject?.name)
+    ? '한국사 암기코드'
+    : isEnglishWordSubject(currentSubject?.name)
+      ? '영어 단어'
+      : '기본 키워드';
+
+  async function loadDefault() {
+    if (!userId || !subjectId) return;
+    setLoadingDefault(true); setLoadDoneMsg(null);
+    try {
+      const r = await loadDefaultKeywords(userId, subjectId, currentSubject?.name);
+      await refreshKeywords();
+      setLoadDoneMsg(`✅ ${r.label} ${r.added}개를 불러왔어요. 이제 학습할 수 있어요!`);
+    } catch (e: any) {
+      setLoadDoneMsg('⚠️ ' + e.message);
+    } finally {
+      setLoadingDefault(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!loadDoneMsg) return;
+    const t = setTimeout(() => setLoadDoneMsg(null), 4000);
+    return () => clearTimeout(t);
+  }, [loadDoneMsg]);
 
   const [phase, setPhase] = useState<Phase>('setup');
   const [era, setEra] = useState('전체');
@@ -53,13 +87,23 @@ export default function KeywordStudyPage() {
   const [sound, setSound] = useState(true);
   const startedAt = useRef(0); // 세션 시작 시각 (공부시간 계산용)
 
-  useEffect(() => { if (userId === null) router.replace('/'); }, [userId, router]);
+  useEffect(() => { if (ready && userId === null) router.replace('/'); }, [ready, userId, router]);
   useEffect(() => { setSrsMap(loadSrs(userId, subjectId)); }, [userId, subjectId]);
   useEffect(() => { setSound(isSoundOn()); }, []);
 
   // 선택한 범위(분류 + 중요도) 안에서 "오늘 복습할" 카드 (예정일 지난 것 + 새 카드)
-  const scoped = items.filter((k) => (era === '전체' || k.era === era) && (imp === 0 || (k.importance ?? 2) >= imp));
-  const due = dueItems(scoped, srsMap);
+  // 하트 애니메이션 타이머 등 무관한 상태 변화로 리렌더될 때마다 최대 1700개
+  // 배열을 다시 필터링하지 않도록, 실제로 바뀌는 값에만 의존해 재계산한다.
+  const scoped = useMemo(
+    () => items.filter((k) => (era === '전체' || k.era === era) && (imp === 0 || (k.importance ?? 2) >= imp)),
+    [items, era, imp],
+  );
+  const due = useMemo(() => dueItems(scoped, srsMap), [scoped, srsMap]);
+  const eraCounts = useMemo(() => {
+    const counts = new Map<string, number>([['전체', items.length]]);
+    items.forEach((item) => counts.set(item.era, (counts.get(item.era) ?? 0) + 1));
+    return counts;
+  }, [items]);
 
   // review=true 면 망각곡선상 복습 예정 카드만으로 세션을 구성한다.
   function start(review = false) {
@@ -151,8 +195,14 @@ export default function KeywordStudyPage() {
       </div>
       {phase === 'session' && <div style={{ marginBottom: 14 }}><GamifyHud state={gam.state} hearts={hearts} heartBreakIdx={heartBreak} /></div>}
 
-      {phase === 'setup' && (items.length === 0 ? (
-        <Empty onGo={() => router.push('/data')} />
+      {phase === 'setup' && loadDoneMsg && (
+        <div aria-live="polite" style={{ marginBottom: 14, fontSize: 12.5, fontWeight: 800, color: loadDoneMsg.startsWith('⚠️') ? '#dc2626' : '#16a34a', background: loadDoneMsg.startsWith('⚠️') ? '#fef2f2' : '#dcfce7', padding: '10px 12px', borderRadius: 11 }}>{loadDoneMsg}</div>
+      )}
+
+      {phase === 'setup' && (loading ? (
+        <LoadingState label="키워드를 불러오는 중…" />
+      ) : items.length === 0 ? (
+        <EmptyKeyword busy={loadingDefault} label={defaultKeywordLabel} onLoadDefault={loadDefault} onGo={() => router.push('/data')} />
       ) : (
         <>
           {/* 오늘의 복습 — 망각곡선상 "지금 다시 봐야 기억이 굳는" 카드들 */}
@@ -171,7 +221,7 @@ export default function KeywordStudyPage() {
           <Section title="📌 학습 범위">
             {eras.map((e) => (
               <Pick key={e} active={era === e} color="#2563eb" onClick={() => setEra(e)}>
-                {e} <small style={{ opacity: .6 }}>{items.filter((k) => e === '전체' || k.era === e).length}</small>
+                {e} <small style={{ opacity: .6 }}>{eraCounts.get(e) ?? 0}</small>
               </Pick>
             ))}
           </Section>
@@ -293,12 +343,26 @@ const Principle = ({ text }: { text: string }) => {
   );
 };
 
-const Empty = ({ onGo }: { onGo: () => void }) => (
+// 키워드가 하나도 없을 때: 데이터 관리 화면으로 나가지 않고 그 자리에서 바로
+// 기본 데이터를 물어보고 적재한다. busy 동안은 모래시계로 진행 중임을 보여준다.
+const EmptyKeyword = ({ busy, label, onLoadDefault, onGo }: { busy: boolean; label: string; onLoadDefault: () => void; onGo: () => void }) => (
   <div style={{ background: '#fff', borderRadius: 20, padding: '26px 20px', textAlign: 'center', boxShadow: '0 10px 30px -18px rgba(15,23,42,.25)' }}>
-    <div style={{ fontSize: 40 }}>📭</div>
-    <div style={{ fontSize: 16, fontWeight: 900, color: '#0f172a', margin: '8px 0 4px' }}>등록된 키워드가 없어요</div>
-    <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 600, marginBottom: 14 }}>데이터 관리에서 기본 데이터를 넣거나 구글 시트를 연결해 주세요</div>
-    <button onClick={onGo} style={primary('#2563eb', true)}>데이터 관리로 가기</button>
+    <div style={{ fontSize: 40 }}>{busy ? '⏳' : '📭'}</div>
+    <div style={{ fontSize: 16, fontWeight: 900, color: '#0f172a', margin: '8px 0 4px' }}>{busy ? `${label}를 불러오는 중…` : '등록된 키워드가 없어요'}</div>
+    {!busy && (
+      <>
+        <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 600, marginBottom: 14 }}>{label}를 지금 바로 불러와서 시작할 수 있어요</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button onClick={onLoadDefault} style={primary('#2563eb')}>{label} 불러오기</button>
+          <button onClick={onGo} style={{ background: 'none', border: 'none', color: '#94a3b8', fontWeight: 800, fontSize: 12.5, cursor: 'pointer', padding: 6 }}>직접 구글 시트로 불러올래요 →</button>
+        </div>
+      </>
+    )}
+  </div>
+);
+const LoadingState = ({ label }: { label: string }) => (
+  <div aria-live="polite" style={{ background: '#fff', borderRadius: 20, padding: '30px 20px', textAlign: 'center', color: '#64748b', fontSize: 14, fontWeight: 800 }}>
+    <div style={{ fontSize: 30, marginBottom: 8 }}>⏳</div>{label}
   </div>
 );
 const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
@@ -331,7 +395,7 @@ const Score = ({ n, label, c, bg }: { n: number; label: string; c: string; bg: s
   </div>
 );
 
-const iconBtn: React.CSSProperties = { width: 38, height: 38, borderRadius: 12, background: '#fff', border: 'none', fontSize: 18, color: '#334155', cursor: 'pointer', boxShadow: '0 6px 16px -10px rgba(15,23,42,.4)' };
+const iconBtn: React.CSSProperties = { width: 44, height: 44, borderRadius: 12, background: '#fff', border: 'none', fontSize: 18, color: '#334155', cursor: 'pointer', boxShadow: '0 6px 16px -10px rgba(15,23,42,.4)' };
 const face: React.CSSProperties = { position: 'absolute', inset: 0, backfaceVisibility: 'hidden', borderRadius: 28, boxShadow: '0 26px 50px -22px rgba(15,23,42,.35)', padding: 26, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' };
 const rate: React.CSSProperties = { flex: 1, border: 'none', borderRadius: 20, padding: 16, fontSize: 15, fontWeight: 900, cursor: 'pointer' };
 const resultCard: React.CSSProperties = { background: '#fff', borderRadius: 28, padding: '30px 24px', boxShadow: '0 26px 50px -22px rgba(15,23,42,.35)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, textAlign: 'center', marginTop: 20 };

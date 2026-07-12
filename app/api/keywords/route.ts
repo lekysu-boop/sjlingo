@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { dedupeKeywords } from '@/lib/dedupe';
 import { clampImportance } from '@/lib/importance';
 import type { KeywordInput } from '@/lib/types';
+import { fetchAllPages } from '@/lib/supabase/pagination';
 
 export const runtime = 'nodejs';
 // Supabase(내부적으로 fetch 사용) 응답을 Next.js가 자동 캐싱하지 않도록 강제.
@@ -21,12 +22,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'userId, subjectId 필요' }, { status: 400 });
 
   const db = createAdminClient();
-  const { data, error } = await db
+  const { data, error } = await fetchAllPages<any>((from, to) => db
     .from('keywords')
     .select(fields === 'id' ? 'id' : '*')
     .eq('owner_id', userId)
     .eq('subject_id', subjectId)
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true })
+    .range(from, to));
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json(data);
 }
@@ -43,11 +46,14 @@ export async function POST(req: NextRequest) {
   const db = createAdminClient();
 
   // 기존 목록을 읽어 중복 판정 (공백/슬래시 무시한 암기코드 비교)
-  const { data: existing } = await db
+  const { data: existing, error: existingError } = await fetchAllPages<{ code: string }>((from, to) => db
     .from('keywords')
     .select('code')
     .eq('owner_id', userId)
-    .eq('subject_id', subjectId);
+    .eq('subject_id', subjectId)
+    .order('id', { ascending: true })
+    .range(from, to));
+  if (existingError) return NextResponse.json({ error: existingError.message }, { status: 500 });
 
   const clean = items
     .filter((it) => (it.code || '').trim() && (it.concept || '').trim())
@@ -60,7 +66,7 @@ export async function POST(req: NextRequest) {
       importance: clampImportance((it as any).importance),
     }));
 
-  const { toInsert, added, skipped } = dedupeKeywords(existing || [], clean);
+  const { toInsert, added, skipped } = dedupeKeywords(existing, clean);
 
   if (toInsert.length) {
     const rows = toInsert.map((it) => ({ ...it, owner_id: userId, subject_id: subjectId }));

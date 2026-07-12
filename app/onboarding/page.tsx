@@ -28,8 +28,8 @@ const SLIDES = [
   },
   {
     emoji: '⚙️',
-    title: '데이터 관리',
-    desc: '하단 "데이터" 탭에서 "기본데이터" 버튼이나 구글 시트 링크로 키워드·기출문제를 한 번에 불러올 수 있어요.',
+    title: '데이터 준비, 신경 쓰지 마세요',
+    desc: '키워드나 기출문제 화면에 처음 들어가면 데이터가 없을 때 바로 물어봐요. 한능검은 기본/심화를 골라 자동으로 불러오고, 다른 과목도 버튼 한 번이면 바로 시작할 수 있어요. 하단 "데이터" 탭에서 언제든 직접 구글 시트로 불러올 수도 있어요.',
     bg: 'linear-gradient(135deg,#0891b2,#0e7490)',
   },
   {
@@ -42,10 +42,10 @@ const SLIDES = [
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const { userId } = useSession();
+  const { userId, ready } = useSession();
   const [step, setStep] = useState(0);
 
-  useEffect(() => { if (userId === null) router.replace('/'); }, [userId, router]);
+  useEffect(() => { if (ready && userId === null) router.replace('/'); }, [ready, userId, router]);
 
   function finish() {
     if (userId) markOnboarded(userId);

@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { dedupeExams } from '@/lib/dedupe';
 import { clampImportance } from '@/lib/importance';
 import type { ExamInput } from '@/lib/types';
+import { fetchAllPages } from '@/lib/supabase/pagination';
 
 export const runtime = 'nodejs';
 // Supabase(내부적으로 fetch 사용) 응답을 Next.js가 자동 캐싱하지 않도록 강제.
@@ -32,12 +33,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ count: count ?? 0 });
   }
 
-  const { data, error } = await db
+  const { data, error } = await fetchAllPages<any>((from, to) => db
     .from('exam_questions')
     .select('*')
     .eq('owner_id', userId)
     .eq('subject_id', subjectId)
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true })
+    .range(from, to));
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json(data);
 }
@@ -52,11 +55,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'userId, subjectId, items 필요' }, { status: 400 });
 
   const db = createAdminClient();
-  const { data: existing } = await db
+  const { data: existing, error: existingError } = await fetchAllPages<{ question: string }>((from, to) => db
     .from('exam_questions')
     .select('question')
     .eq('owner_id', userId)
-    .eq('subject_id', subjectId);
+    .eq('subject_id', subjectId)
+    .order('id', { ascending: true })
+    .range(from, to));
+  if (existingError) return NextResponse.json({ error: existingError.message }, { status: 500 });
 
   const clean = items
     .filter((it) => (it.question || '').trim() && Array.isArray(it.options) && it.options.length >= 2)
@@ -74,7 +80,7 @@ export async function POST(req: NextRequest) {
       };
     });
 
-  const { toInsert, added, skipped } = dedupeExams(existing || [], clean);
+  const { toInsert, added, skipped } = dedupeExams(existing, clean);
   if (toInsert.length) {
     const rows = toInsert.map((it) => ({ ...it, owner_id: userId, subject_id: subjectId }));
     let { error } = await db.from('exam_questions').insert(rows);

@@ -11,7 +11,9 @@ import { GamifyStyles, GamifyHud, Confetti, XpFloat, ComboBadge, Mascot } from '
 import { pickRotating } from '@/lib/rotation';
 import { balanceAnswers } from '@/lib/examShuffle';
 import { generateExamFromKeywords, isSyntheticExamId } from '@/lib/examGen';
-import { isEnglishWordSubject } from '@/lib/defaultData';
+import { isEnglishWordSubject, isKoreanHistorySubject } from '@/lib/defaultData';
+import { loadDefaultExam } from '@/lib/defaultDataLoad';
+import { parseQuestionDisplay } from '@/lib/examDisplay';
 import { bumpQuestSession, bumpQuestCombo } from '@/lib/quests';
 import { playCorrect, playCombo, playWrong, playFinish, isSoundOn, toggleSound } from '@/lib/sound';
 import type { ExamQuestion } from '@/lib/types';
@@ -28,24 +30,56 @@ const NUMS = ['①', '②', '③', '④', '⑤'];
 // ============================================================================
 export default function ExamStudyPage() {
   const router = useRouter();
-  const { userId, subjectId } = useSession();
+  const { userId, subjectId, ready } = useSession();
   const { current: currentSubject } = useSubjects(userId, subjectId);
-  const { items: examItems, eras: examEras } = useExams(userId, subjectId);
+  const { items: examItems, eras: examEras, loading: examsLoading, refresh: refreshExams } = useExams(userId, subjectId);
   const kw = useKeywords(userId, subjectId);
   const gam = useGamification(userId);
 
   // 영어 단어 과목은 등록된 기출문제가 없으면, 등록된 키워드(단어+뜻)로 그 자리에서
   // 4지선다 문제를 만들어 풉니다. 등록된 기출문제가 하나라도 있으면 항상 그것을 우선합니다.
   const isEnglishWord = isEnglishWordSubject(currentSubject?.name);
+  const isKoreanHistory = isKoreanHistorySubject(currentSubject?.name);
+
+  // 화면 진입 시 등록된 기출문제가 하나도 없으면(+ 영어 단어처럼 자동 생성도 안 되면),
+  // 데이터 관리로 나가지 않고 이 자리에서 바로 기본 데이터를 불러올 수 있게 한다.
+  const [loadingLevel, setLoadingLevel] = useState<'basic' | 'advanced' | null>(null);
+  const [loadDoneMsg, setLoadDoneMsg] = useState<string | null>(null);
+
+  async function loadDefault(level: 'basic' | 'advanced' = 'basic') {
+    if (!userId || !subjectId) return;
+    setLoadingLevel(level); setLoadDoneMsg(null);
+    try {
+      const r = await loadDefaultExam(userId, subjectId, currentSubject?.name, level);
+      await refreshExams();
+      setLoadDoneMsg(`✅ ${r.label} ${r.added}개를 불러왔어요. 이제 학습할 수 있어요!`);
+    } catch (e: any) {
+      setLoadDoneMsg('⚠️ ' + e.message);
+    } finally {
+      setLoadingLevel(null);
+    }
+  }
+
+  useEffect(() => {
+    if (!loadDoneMsg) return;
+    const t = setTimeout(() => setLoadDoneMsg(null), 4000);
+    return () => clearTimeout(t);
+  }, [loadDoneMsg]);
   const generatedItems = useMemo(
     () => (examItems.length === 0 && isEnglishWord ? generateExamFromKeywords(kw.items) : []),
     [examItems.length, isEnglishWord, kw.items],
   );
   const items = examItems.length ? examItems : generatedItems;
   const eras = useMemo(
-    () => (examItems.length ? examEras : ['전체', ...Array.from(new Set(generatedItems.map((q) => q.era)))]),
+    () => (examItems.length ? examEras : Array.from(new Set(['전체', ...generatedItems.map((q) => q.era)]))),
     [examItems.length, examEras, generatedItems],
   );
+  const dataLoading = examsLoading || (isEnglishWord && kw.loading);
+  const eraCounts = useMemo(() => {
+    const counts = new Map<string, number>([['전체', items.length]]);
+    items.forEach((item) => counts.set(item.era, (counts.get(item.era) ?? 0) + 1));
+    return counts;
+  }, [items]);
 
   const [phase, setPhase] = useState<Phase>('setup');
   const [era, setEra] = useState('전체');
@@ -71,14 +105,16 @@ export default function ExamStudyPage() {
   // 지금까지 틀린 문제 id (서버 기록). 현재 과목의 문제와 교집합만 "오답 복습" 대상.
   const [wrongIds, setWrongIds] = useState<Set<string>>(new Set());
 
-  useEffect(() => { if (userId === null) router.replace('/'); }, [userId, router]);
+  useEffect(() => { if (ready && userId === null) router.replace('/'); }, [ready, userId, router]);
   useEffect(() => { setSound(isSoundOn()); }, []);
   useEffect(() => {
     if (userId) wrongExamIds(userId).then((r) => setWrongIds(new Set(r.wrongIds))).catch(() => {});
   }, [userId]);
 
   // 오답 복습 풀: 현재 과목 문제 중 틀린 기록이 있는 것 (과목이 여러 개여도 현재 과목만)
-  const wrongPool = items.filter((q) => wrongIds.has(q.id));
+  // 하트 애니메이션 타이머 등 무관한 상태 변화로 리렌더될 때마다 최대 1700개
+  // 배열을 다시 필터링하지 않도록, 실제로 바뀌는 값에만 의존해 재계산한다.
+  const wrongPool = useMemo(() => items.filter((q) => wrongIds.has(q.id)), [items, wrongIds]);
 
   // 지문·보기가 길어 페이지가 스크롤된 상태에서 다음 문제로 넘어가면
   // 화면을 문제 상단으로 되돌려 준다.
@@ -156,7 +192,8 @@ export default function ExamStudyPage() {
   }
 
   const q = deck[idx];
-  const qp = q ? parseQuestion(q.question) : null;
+  // q.id에만 의존 — 하트 애니메이션 등 무관한 리렌더마다 정규식 파싱을 반복하지 않는다.
+  const qp = useMemo(() => (q ? parseQuestionDisplay(q.question) : null), [q?.id]);
   const isRight = pick !== null && pick === q?.answer;
   const isLast = idx + 1 >= deck.length;
 
@@ -174,8 +211,22 @@ export default function ExamStudyPage() {
       </div>
       {phase === 'session' && <div style={{ marginBottom: 14 }}><GamifyHud state={gam.state} hearts={hearts} heartBreakIdx={heartBreak} /></div>}
 
-      {phase === 'setup' && (items.length === 0 ? (
-        <Empty onGo={() => router.push('/data')} />
+      {phase === 'setup' && loadDoneMsg && (
+        <div aria-live="polite" style={{ marginBottom: 14, fontSize: 12.5, fontWeight: 800, color: loadDoneMsg.startsWith('⚠️') ? '#dc2626' : '#16a34a', background: loadDoneMsg.startsWith('⚠️') ? '#fef2f2' : '#dcfce7', padding: '10px 12px', borderRadius: 11 }}>{loadDoneMsg}</div>
+      )}
+
+      {phase === 'setup' && (dataLoading ? (
+        <LoadingState label="기출문제를 불러오는 중…" />
+      ) : items.length === 0 ? (
+        <EmptyExam
+          loadingLevel={loadingLevel}
+          isKoreanHistory={isKoreanHistory}
+          isEnglishWord={isEnglishWord}
+          onLoadBasic={() => loadDefault('basic')}
+          onLoadAdvanced={() => loadDefault('advanced')}
+          onLoadDefault={() => loadDefault()}
+          onGo={() => router.push('/data')}
+        />
       ) : (
         <>
           {/* 오답 다시 풀기 — 현재 과목에서 틀린 기록이 있는 문제만 */}
@@ -194,7 +245,7 @@ export default function ExamStudyPage() {
           <Section title="🏛️ 학습 범위">
             {eras.map((e) => (
               <Pick key={e} active={era === e} onClick={() => setEra(e)}>
-                {e} <small style={{ opacity: .6 }}>{items.filter((q) => e === '전체' || q.era === e).length}</small>
+                {e} <small style={{ opacity: .6 }}>{eraCounts.get(e) ?? 0}</small>
               </Pick>
             ))}
           </Section>
@@ -304,34 +355,61 @@ export default function ExamStudyPage() {
 // ----------------------------------------------------------------------------
 //  "**[57회 심화 1번 / 1점]** [이미지: 유물 발굴 고인돌] 실제 지문..." 형태에서
 //   · 맨 앞 **[...]** → 회차/배점 메타 (뱃지로 표시)
-//   · [이미지: ...]   → 제시 자료 설명 (자료 상자로 표시)
-//   · 나머지          → 순수 지문
-//  형식이 없는 일반 지문은 그대로 text 로만 반환된다.
-function parseQuestion(raw: string): { meta: string; image: string; text: string } {
-  let s = (raw || '').trim();
-  let meta = '';
-  let image = '';
-  const m = s.match(/^\*\*\[([^\]]+)\]\*\*\s*/);
-  if (m) { meta = m[1].trim(); s = s.slice(m[0].length); }
-  const im = s.match(/\[이미지:\s*([^\]]*)\]\s*/);
-  if (im && im.index !== undefined) {
-    image = im[1].trim();
-    s = (s.slice(0, im.index) + ' ' + s.slice(im.index + im[0].length)).trim();
-  }
-  return { meta, image, text: s.replace(/\*\*/g, '') };
-}
-
 // "**굵게**" 마크다운을 <b> 로 렌더링 (해설 텍스트용)
 const Bold = ({ text }: { text: string }) => (
   <>{text.split('**').map((seg, i) => (i % 2 ? <b key={i}>{seg}</b> : seg))}</>
 );
 
-const Empty = ({ onGo }: { onGo: () => void }) => (
-  <div style={{ background: '#fff', borderRadius: 20, padding: '26px 20px', textAlign: 'center', boxShadow: '0 10px 30px -18px rgba(15,23,42,.25)' }}>
-    <div style={{ fontSize: 40 }}>📭</div>
-    <div style={{ fontSize: 16, fontWeight: 900, color: '#0f172a', margin: '8px 0 4px' }}>등록된 문제가 없어요</div>
-    <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 600, marginBottom: 14 }}>데이터 관리에서 기본 데이터를 넣거나 구글 시트를 연결해 주세요</div>
-    <button onClick={onGo} style={{ ...primary, width: undefined, fontSize: 14, padding: '13px 22px' }}>데이터 관리로 가기</button>
+// 기출문제가 하나도 없을 때: 데이터 관리 화면으로 나가지 않고 그 자리에서 바로
+// 기본 데이터를 물어보고 적재한다. 한국사는 기본/심화를 고르게 하고, 영어 단어는
+// 키워드만 있으면 자동 생성되므로(그래도 없다면) 데이터 관리로 안내한다.
+const EmptyExam = ({ loadingLevel, isKoreanHistory, isEnglishWord, onLoadBasic, onLoadAdvanced, onLoadDefault, onGo }: {
+  loadingLevel: 'basic' | 'advanced' | null;
+  isKoreanHistory: boolean;
+  isEnglishWord: boolean;
+  onLoadBasic: () => void;
+  onLoadAdvanced: () => void;
+  onLoadDefault: () => void;
+  onGo: () => void;
+}) => {
+  const busy = loadingLevel !== null;
+  return (
+    <div style={{ background: '#fff', borderRadius: 20, padding: '26px 20px', textAlign: 'center', boxShadow: '0 10px 30px -18px rgba(15,23,42,.25)' }}>
+      <div style={{ fontSize: 40 }}>{busy ? '⏳' : '📭'}</div>
+      <div style={{ fontSize: 16, fontWeight: 900, color: '#0f172a', margin: '8px 0 4px' }}>
+        {busy ? `${loadingLevel === 'advanced' ? '심화' : '기본'} 기출문제를 불러오는 중…` : '등록된 문제가 없어요'}
+      </div>
+      {!busy && isKoreanHistory && (
+        <>
+          <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 600, marginBottom: 14 }}>기본/심화 중 골라서 지금 바로 불러올 수 있어요</div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+            <button onClick={onLoadBasic} style={{ flex: 1, background: '#ede9fe', color: '#6d28d9', border: 'none', fontWeight: 900, fontSize: 14, padding: 14, borderRadius: 15, cursor: 'pointer' }}>기본적재</button>
+            <button onClick={onLoadAdvanced} style={{ flex: 1, background: '#fae8ff', color: '#a21caf', border: 'none', fontWeight: 900, fontSize: 14, padding: 14, borderRadius: 15, cursor: 'pointer' }}>심화적재</button>
+          </div>
+          <button onClick={onGo} style={{ background: 'none', border: 'none', color: '#94a3b8', fontWeight: 800, fontSize: 12.5, cursor: 'pointer', padding: 6 }}>직접 구글 시트로 불러올래요 →</button>
+        </>
+      )}
+      {!busy && !isKoreanHistory && isEnglishWord && (
+        <>
+          <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 600, marginBottom: 14 }}>영어 단어를 등록하면 그 자리에서 문제를 자동으로 만들어 드려요</div>
+          <button onClick={onGo} style={{ ...primary, width: undefined, fontSize: 14, padding: '13px 22px' }}>데이터 관리로 가기</button>
+        </>
+      )}
+      {!busy && !isKoreanHistory && !isEnglishWord && (
+        <>
+          <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 600, marginBottom: 14 }}>기본 기출문제를 지금 바로 불러와서 시작할 수 있어요</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <button onClick={onLoadDefault} style={{ ...primary, width: '100%' }}>기본 기출문제 불러오기</button>
+            <button onClick={onGo} style={{ background: 'none', border: 'none', color: '#94a3b8', fontWeight: 800, fontSize: 12.5, cursor: 'pointer', padding: 6 }}>직접 구글 시트로 불러올래요 →</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+const LoadingState = ({ label }: { label: string }) => (
+  <div aria-live="polite" style={{ background: '#fff', borderRadius: 20, padding: '30px 20px', textAlign: 'center', color: '#64748b', fontSize: 14, fontWeight: 800 }}>
+    <div style={{ fontSize: 30, marginBottom: 8 }}>⏳</div>{label}
   </div>
 );
 const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
@@ -350,7 +428,7 @@ const Score = ({ n, label, c, bg }: { n: number; label: string; c: string; bg: s
   </div>
 );
 
-const iconBtn: React.CSSProperties = { width: 38, height: 38, borderRadius: 12, background: '#fff', border: 'none', fontSize: 18, color: '#334155', cursor: 'pointer', boxShadow: '0 6px 16px -10px rgba(15,23,42,.4)' };
+const iconBtn: React.CSSProperties = { width: 44, height: 44, borderRadius: 12, background: '#fff', border: 'none', fontSize: 18, color: '#334155', cursor: 'pointer', boxShadow: '0 6px 16px -10px rgba(15,23,42,.4)' };
 const resultCard: React.CSSProperties = { background: '#fff', borderRadius: 28, padding: '30px 24px', boxShadow: '0 26px 50px -22px rgba(15,23,42,.35)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, textAlign: 'center', marginTop: 20 };
 const gray: React.CSSProperties = { background: '#eef2f7', color: '#334155', border: 'none', fontWeight: 900, fontSize: 14, padding: '13px 20px', borderRadius: 15, cursor: 'pointer' };
 const primary: React.CSSProperties = { width: '100%', background: '#7c3aed', color: '#fff', border: 'none', fontWeight: 900, fontSize: 17, padding: 17, borderRadius: 18, cursor: 'pointer' };

@@ -4,6 +4,7 @@ import { dedupeKeywords, dedupeExactExams } from '@/lib/dedupe';
 import { clampImportance } from '@/lib/importance';
 import { findColumn, findHeaderRow, parseCsv, toGoogleSheetCsvUrl } from '@/lib/googleSheet';
 import { parseExamSheetRows } from '@/lib/sheetImport';
+import { fetchAllPages } from '@/lib/supabase/pagination';
 
 export const runtime = 'nodejs';
 
@@ -68,9 +69,12 @@ export async function POST(req: NextRequest) {
       importance: clampImportance(g(r, iImp, '2')), // '상/중/하' 또는 1~3
     })).filter((k) => k.code && k.concept);
 
-    const { data: existing } = await db.from('keywords').select('code')
-      .eq('owner_id', userId).eq('subject_id', subjectId);
-    const { toInsert, added, skipped } = dedupeKeywords(existing || [], items);
+    const { data: existing, error: existingError } = await fetchAllPages<{ code: string }>((from, to) =>
+      db.from('keywords').select('code').eq('owner_id', userId).eq('subject_id', subjectId)
+        .order('id', { ascending: true }).range(from, to),
+    );
+    if (existingError) return NextResponse.json({ error: existingError.message }, { status: 500 });
+    const { toInsert, added, skipped } = dedupeKeywords(existing, items);
     if (toInsert.length) {
       const rows2 = toInsert.map((it) => ({ ...it, owner_id: userId, subject_id: subjectId }));
       const { error } = await db.from('keywords').insert(rows2);
@@ -88,13 +92,16 @@ export async function POST(req: NextRequest) {
     );
   const items = parsedExam.items;
 
-  const { data: existing } = await db.from('exam_questions').select('question')
-    .eq('owner_id', userId).eq('subject_id', subjectId);
-  const { toInsert, added, skipped } = dedupeExactExams(existing || [], items);
+  const { data: existing, error: existingError } = await fetchAllPages<{ question: string }>((from, to) =>
+    db.from('exam_questions').select('question').eq('owner_id', userId).eq('subject_id', subjectId)
+      .order('id', { ascending: true }).range(from, to),
+  );
+  if (existingError) return NextResponse.json({ error: existingError.message }, { status: 500 });
+  const { toInsert, added, skipped } = dedupeExactExams(existing, items);
   if (toInsert.length) {
     const rows2 = toInsert.map((it) => ({ ...it, owner_id: userId, subject_id: subjectId }));
     const { error } = await db.from('exam_questions').insert(rows2);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  return NextResponse.json({ kind, added, skipped, parsed: items.length });
+  return NextResponse.json({ kind, added, skipped, parsed: items.length, rejected: parsedExam.rejected });
 }

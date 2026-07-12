@@ -10,11 +10,11 @@ import type { LeagueEntry } from '@/lib/types';
 // 주간 리그·리더보드: 이번 주 XP 순위. 상위 3명 승급.
 export default function LeaguePage() {
   const router = useRouter();
-  const { userId } = useSession();
+  const { userId, ready } = useSession();
   const [league, setLeague] = useState<LeagueEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { if (userId === null) router.replace('/'); }, [userId, router]);
+  useEffect(() => { if (ready && userId === null) router.replace('/'); }, [ready, userId, router]);
   useEffect(() => {
     if (!userId) return;
     getLeague(userId).then((l) => { setLeague(l); setLoading(false); }).catch(() => setLoading(false));
@@ -32,9 +32,9 @@ export default function LeaguePage() {
           <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 700, lineHeight: 1.5 }}>이번 주 공부시간×3 + XP + 평균 정답률 합산 순위<br />상위 3명 승급!</div>
         </div>
 
-        {loading && <div style={{ textAlign: 'center', color: '#94a3b8', fontWeight: 700, padding: '30px 0' }}>불러오는 중…</div>}
+        {loading && <div aria-live="polite" style={{ textAlign: 'center', color: '#94a3b8', fontWeight: 700, padding: '30px 0' }}>불러오는 중…</div>}
         {!loading && league.length === 0 && (
-          <div style={{ textAlign: 'center', color: '#94a3b8', fontWeight: 700, fontSize: 13, padding: '30px 20px', lineHeight: 1.6 }}>
+          <div aria-live="polite" style={{ textAlign: 'center', color: '#94a3b8', fontWeight: 700, fontSize: 13, padding: '30px 20px', lineHeight: 1.6 }}>
             아직 이번 주 기록이 없어요.<br />학습을 시작하면 XP가 쌓이고 순위에 올라요!
           </div>
         )}

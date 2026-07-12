@@ -15,9 +15,9 @@ describe('toGoogleSheetCsvUrl', () => {
     expect(toGoogleSheetCsvUrl('https://example.com/not-a-sheet')).toBeNull();
   });
 
-  it('한국사 기본적재 URL은 TOC가 아닌 실제 데이터 탭 gid를 사용한다', () => {
+  it('한국사 최종 기본적재 URL은 첫 번째 전체통합 탭을 사용한다', () => {
     expect(toGoogleSheetCsvUrl(KOREAN_HISTORY_BASIC_EXAM_SHEET_URL)).toBe(
-      'https://docs.google.com/spreadsheets/d/1nb5gkJcjacVIvY1U2bVnZKnaDv6bCT_NNEM6IM-MpN0/gviz/tq?tqx=out:csv&gid=1701503140',
+      'https://docs.google.com/spreadsheets/d/1U1CjPfvykkcGrWTyt__RgCHMhuqSvlRygPtmoXCkafU/gviz/tq?tqx=out:csv&gid=0',
     );
   });
 });

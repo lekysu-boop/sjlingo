@@ -12,6 +12,7 @@ import type { ExamInput } from './types';
 export interface ParsedExamSheet {
   headerIndex: number;
   items: ExamInput[];
+  rejected: number;
 }
 
 const valueAt = (row: string[], index: number, fallback = '') =>
@@ -23,6 +24,35 @@ const isOptionPlaceholder = (value: string) => value === '' || /^[-–—]$/.tes
 const QUESTION_CANDIDATES = ['문제', '문항', '질문', 'question', 'questiontext', '문제내용', '문제 내용', '문제번호', '문제 번호'];
 const ANSWER_CANDIDATES = ['정답', '해답', '답', 'answer', '정답선택', '정답 선택', '정답번호', '정답 번호', '답안'];
 const isOptionLabel = (label: string) => /보기|선택지|opt|choice/i.test((label || '').replace(/\s/g, ''));
+const CIRCLED_ANSWERS = ['①', '②', '③', '④', '⑤'];
+
+const normalizeHeader = (label: string) =>
+  (label || '').replace(/^\uFEFF/, '').replace(/\s/g, '').toLowerCase();
+
+/** `문항번호`보다 실제 `문제` 본문 열을 우선합니다. */
+function findQuestionColumn(header: string[]): number {
+  const exactNames = new Set(['문제', '문항', '질문', 'question', 'questiontext', '문제내용']);
+  const exact = header.findIndex((label) => exactNames.has(normalizeHeader(label)));
+  if (exact >= 0) return exact;
+
+  return header.findIndex((label) => {
+    const normalized = normalizeHeader(label);
+    return !normalized.includes('번호') && QUESTION_CANDIDATES.some((candidate) =>
+      normalized.includes(normalizeHeader(candidate)),
+    );
+  });
+}
+
+function parseOriginalAnswerIndex(answerRaw: string, sourceOptions: string[]): number {
+  const normalized = answerRaw.trim();
+  const circled = CIRCLED_ANSWERS.indexOf(normalized);
+  if (circled >= 0) return circled;
+
+  const numbered = normalized.match(/^(?:정답\s*[:：]?\s*)?([1-5])(?:번)?$/i);
+  if (numbered) return Number(numbered[1]) - 1;
+
+  return sourceOptions.findIndex((option) => option.trim() === normalized);
+}
 
 /**
  * 기출문제 헤더 행을 찾습니다. 정답 열은 이름 없이 보기 열 바로 뒤에만 있는 시트도 있어
@@ -31,7 +61,7 @@ const isOptionLabel = (label: string) => /보기|선택지|opt|choice/i.test((la
 function findExamHeaderIndex(rows: string[][]): number {
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
     const row = rows[rowIndex];
-    const questionIndex = findColumn(row, QUESTION_CANDIDATES);
+    const questionIndex = findQuestionColumn(row);
     if (questionIndex < 0) continue;
     const hasNamedAnswer = findColumn(row, ANSWER_CANDIDATES) >= 0;
     const hasOptionColumn = row.some((label, index) => index !== questionIndex && isOptionLabel(label));
@@ -43,11 +73,11 @@ function findExamHeaderIndex(rows: string[][]): number {
 /** 헤더 이름을 기준으로 기출문제 행을 파싱합니다. 헤더가 없으면 headerIndex=-1입니다. */
 export function parseExamSheetRows(rows: string[][]): ParsedExamSheet {
   const headerIndex = findExamHeaderIndex(rows);
-  if (headerIndex < 0) return { headerIndex, items: [] };
+  if (headerIndex < 0) return { headerIndex, items: [], rejected: 0 };
 
   const header = rows[headerIndex];
   const eraIndex = findColumn(header, ['시대', '범위', 'era']);
-  const questionIndex = findColumn(header, QUESTION_CANDIDATES);
+  const questionIndex = findQuestionColumn(header);
   let answerIndex = findColumn(header, ANSWER_CANDIDATES);
   const explanationIndex = findColumn(header, ['해설', '풀이', 'explain']);
   const importanceIndex = findColumn(header, ['중요도', '중요', 'importance']);
@@ -68,26 +98,28 @@ export function parseExamSheetRows(rows: string[][]): ParsedExamSheet {
     if ((header[afterOptions] ?? '').trim() === '') answerIndex = afterOptions;
   }
 
+  let rejected = 0;
   const items = rows
     .slice(headerIndex + 1)
-    .map((row): ExamInput => {
+    .map((row): ExamInput | null => {
       const sourceOptionIndexes = optionIndexes.length ? optionIndexes : [2, 3, 4, 5];
-      const keptOptions = sourceOptionIndexes
-        .map((columnIndex, originalIndex) => ({
-          text: valueAt(row, columnIndex),
+      const sourceOptions = sourceOptionIndexes.map((columnIndex) => valueAt(row, columnIndex));
+      const keptOptions = sourceOptions
+        .map((text, originalIndex) => ({
+          text,
           originalIndex,
         }))
         .filter((option) => !isOptionPlaceholder(option.text));
 
       const options = keptOptions.map((option) => option.text);
-      const answerRaw = valueAt(row, answerIndex, '1');
-      const answerNumber = Number.parseInt(answerRaw, 10);
-      let answer = Number.isNaN(answerNumber)
-        ? options.findIndex((option) => option === answerRaw)
-        : keptOptions.findIndex((option) => option.originalIndex === answerNumber - 1);
+      const originalAnswer = parseOriginalAnswerIndex(valueAt(row, answerIndex), sourceOptions);
+      const answer = keptOptions.findIndex((option) => option.originalIndex === originalAnswer);
 
-      // 원본 정답이 비어 있거나 제거된 보기('-')를 가리키면 첫 보기로 안전하게 보정합니다.
-      if (answer < 0 || answer >= options.length) answer = 0;
+      // 정답 없음/빈 값/제거된 보기를 임의로 1번 처리하면 오답 데이터가 되므로 제외합니다.
+      if (answer < 0 || answer >= options.length) {
+        if (valueAt(row, questionIndex) !== '' && options.length >= 2) rejected++;
+        return null;
+      }
 
       return {
         era: valueAt(row, eraIndex >= 0 ? eraIndex : 0, '기타'),
@@ -99,7 +131,7 @@ export function parseExamSheetRows(rows: string[][]): ParsedExamSheet {
       };
     })
     // '▶ 선사시대' 같은 구분 행에는 문제/보기가 없으므로 실제 문항에서 제외합니다.
-    .filter((item) => item.question !== '' && item.options.length >= 2);
+    .filter((item): item is ExamInput => item !== null && item.question !== '' && item.options.length >= 2);
 
-  return { headerIndex, items };
+  return { headerIndex, items, rejected };
 }

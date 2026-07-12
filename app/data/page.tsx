@@ -5,6 +5,7 @@ import { useSession } from '@/hooks/useSession';
 import { useSubjects } from '@/hooks/useSubjects';
 import { useKeywords } from '@/hooks/useKeywords';
 import { useExams } from '@/hooks/useExams';
+import { useStudySummary } from '@/hooks/useStudySummary';
 import { addKeywords, addExams, updateKeyword, updateExam, deleteKeyword, deleteExam, deleteAllKeywords, deleteAllExams, importSheet } from '@/lib/api';
 import {
   DEFAULT_KEYWORDS,
@@ -17,12 +18,19 @@ import {
   isEnglishWordSubject,
 } from '@/lib/defaultData';
 import { TabBar } from '@/components/TabBar';
+import { clearLocalStudyState } from '@/lib/localCleanup';
 import type { Keyword, ExamQuestion } from '@/lib/types';
 
 type Tab = 'kw' | 'ex';
 // 편집 대상: 신규(add)면 id 없음, 수정(edit)이면 원본 보관
 type KwEdit = { mode: 'add' | 'edit'; id?: string; era: string; code: string; concept: string; principle: string; day: string; importance: number };
 type ExEdit = { mode: 'add' | 'edit'; id?: string; era: string; question: string; o: string[]; answer: number; explain: string; importance: number };
+type ImportResult = { added: number; skipped: number; parsed: number; rejected?: number };
+
+function importSummary(label: string, result: ImportResult): string {
+  const rejected = result.rejected ? ` / 정답 미확정 ${result.rejected}개 제외` : '';
+  return `✅ ${label} ${result.added}개 추가 (중복 ${result.skipped}개 스킵 / 유효 ${result.parsed}행${rejected})`;
+}
 
 // ============================================================================
 //  데이터 관리 프로그램
@@ -33,16 +41,20 @@ type ExEdit = { mode: 'add' | 'edit'; id?: string; era: string; question: string
 // ============================================================================
 export default function DataPage() {
   const router = useRouter();
-  const { userId, subjectId } = useSession();
+  const { userId, subjectId, ready } = useSession();
+  const [tab, setTab] = useState<Tab>('kw');
   // 세션에는 id만 있으므로 과목 목록에서 현재 과목명을 복원합니다.
   // 이 이름으로 한국사 전용 기본 소스와 범용 내장 샘플 중 하나를 선택합니다.
   const { current: currentSubject, loading: subjectsLoading } = useSubjects(userId, subjectId);
-  const kw = useKeywords(userId, subjectId);
-  const ex = useExams(userId, subjectId);
+  // 상세 본문은 현재 탭만 조회합니다. 반대 탭은 가벼운 개수 조회만 사용해
+  // 데이터 관리 첫 진입 때 1,700여 기출 해설까지 동시에 받지 않도록 합니다.
+  const kw = useKeywords(userId, tab === 'kw' ? subjectId : null);
+  const ex = useExams(userId, tab === 'ex' ? subjectId : null);
+  const summary = useStudySummary(userId, subjectId);
 
-  const [tab, setTab] = useState<Tab>('kw');
   const [sheetUrl, setSheetUrl] = useState('');
   const [busy, setBusy] = useState(false);
+  const [busyText, setBusyText] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [kwEdit, setKwEdit] = useState<KwEdit | null>(null);
   const [exEdit, setExEdit] = useState<ExEdit | null>(null);
@@ -57,7 +69,7 @@ export default function DataPage() {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { if (userId === null) router.replace('/'); }, [userId, router]);
+  useEffect(() => { if (ready && userId === null) router.replace('/'); }, [ready, userId, router]);
 
   // 탭을 바꾸면 검색·필터·목록을 처음 상태로 되돌린다.
   useEffect(() => { setQ(''); setEraFilter('전체'); setImpFilter(0); }, [tab]);
@@ -85,94 +97,105 @@ export default function DataPage() {
   }, [ex.items, q, eraFilter, impFilter]);
   const list = tab === 'kw' ? filteredKw : filteredEx;
   const total = tab === 'kw' ? kw.items.length : ex.items.length;
+  const currentLoading = tab === 'kw' ? kw.loading : ex.loading;
+  const keywordCount = tab === 'kw' ? kw.items.length : summary.kwCount;
+  const examCount = tab === 'ex' ? ex.items.length : summary.exCount;
   const isKoreanHistory = isKoreanHistorySubject(currentSubject?.name);
   const isEnglishWord = isEnglishWordSubject(currentSubject?.name);
   const useKoreanHistoryKeywordSheet = tab === 'kw' && isKoreanHistory;
   const useKoreanHistoryExamPresets = tab === 'ex' && isKoreanHistory;
   const useEnglishKeywordSheet = tab === 'kw' && !isKoreanHistory && isEnglishWord;
 
+  async function refreshCurrent() {
+    await (tab === 'kw' ? kw.refresh() : ex.refresh());
+    await summary.refresh();
+  }
+
   // "기본데이터"는 과목/탭에 따라 소스가 달라집니다.
-  // - 한국사 키워드: 운영 마스터 Google Sheet(현재 674개)
+  // - 한국사 키워드: 최종 통합 Google Sheet
   // - 영어 단어 키워드: 영단어 마스터 Google Sheet
   // - 그 외 키워드 및 기출: 코드에 포함된 작은 실습용 샘플
   // 서버 API가 기존 DB와 유입 데이터 내부의 중복을 모두 제거하므로 여러 번 눌러도 안전합니다.
   async function loadDefault() {
     if (!userId || !subjectId) return;
-    setBusy(true); setMsg(null);
+    setBusy(true);
+    setBusyText(useKoreanHistoryKeywordSheet ? '암기코드를 가져오는 중…' : useEnglishKeywordSheet ? '영어 단어를 가져오는 중…' : '기본 데이터를 추가하는 중…');
+    setMsg(null);
     try {
       if (useKoreanHistoryKeywordSheet) {
         const r = await importSheet(userId, subjectId, 'keyword', KOREAN_HISTORY_KEYWORD_SHEET_URL);
-        setMsg({ text: `✅ 한국사 기본데이터 ${r.added}개 추가 (중복 ${r.skipped}개 스킵 / 총 ${r.parsed}행)`, ok: true });
-        kw.refresh();
+        setMsg({ text: importSummary('한국사 암기코드', r), ok: true });
+        await refreshCurrent();
         return;
       }
       if (useEnglishKeywordSheet) {
         const r = await importSheet(userId, subjectId, 'keyword', ENGLISH_WORD_KEYWORD_SHEET_URL);
         setMsg({ text: `✅ 영어 단어 기본데이터 ${r.added}개 추가 (중복 ${r.skipped}개 스킵 / 총 ${r.parsed}행)`, ok: true });
-        kw.refresh();
+        await refreshCurrent();
         return;
       }
       const r = tab === 'kw'
         ? await addKeywords(userId, subjectId, DEFAULT_KEYWORDS)
         : await addExams(userId, subjectId, DEFAULT_EXAMS);
       setMsg({ text: `✅ ${r.added}개 추가 (중복 ${r.skipped}개 스킵)`, ok: true });
-      tab === 'kw' ? kw.refresh() : ex.refresh();
+      await refreshCurrent();
     } catch (e: any) { setMsg({ text: '⚠️ ' + e.message, ok: false }); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setBusyText(null); }
   }
 
-  // 한국사 기출 기본/심화는 서로 다른 시트를 사용합니다. 현재는 기본 URL만 제공되어
-  // 기본적재만 활성화하고, 심화적재는 URL이 설정되는 즉시 같은 흐름으로 동작합니다.
+  // 한국사 기출 기본/심화는 서로 다른 최종 통합 시트를 사용합니다.
   async function loadKoreanHistoryExam(level: 'basic' | 'advanced') {
     if (!userId || !subjectId) return;
     const url = level === 'basic'
       ? KOREAN_HISTORY_BASIC_EXAM_SHEET_URL
       : KOREAN_HISTORY_ADVANCED_EXAM_SHEET_URL;
-    if (!url) {
-      setMsg({ text: '⚠️ 심화적재 시트는 아직 준비 중이에요.', ok: false });
-      return;
-    }
-
-    setBusy(true); setMsg(null);
+    const label = level === 'basic' ? '기본적재' : '심화적재';
+    setBusy(true); setBusyText(`한국사 ${label} 처리 중…`); setMsg(null);
     try {
       const r = await importSheet(userId, subjectId, 'exam', url);
-      const label = level === 'basic' ? '기본적재' : '심화적재';
-      setMsg({ text: `✅ 한국사 ${label} ${r.added}개 추가 (중복 ${r.skipped}개 스킵 / 총 ${r.parsed}행)`, ok: true });
-      ex.refresh();
+      setMsg({ text: importSummary(`한국사 ${label}`, r), ok: true });
+      await refreshCurrent();
     } catch (e: any) { setMsg({ text: '⚠️ ' + e.message, ok: false }); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setBusyText(null); }
   }
 
   async function loadSheet() {
     if (!userId || !subjectId || !sheetUrl.trim()) return;
-    setBusy(true); setMsg(null);
+    setBusy(true); setBusyText('Google Sheet를 분석하고 적재하는 중…'); setMsg(null);
     try {
       const r = await importSheet(userId, subjectId, tab === 'kw' ? 'keyword' : 'exam', sheetUrl.trim());
-      setMsg({ text: `✅ ${r.added}개 추가 (중복 ${r.skipped}개 스킵 / 총 ${r.parsed}행)`, ok: true });
+      setMsg({ text: importSummary('Google Sheet', r), ok: true });
       setSheetUrl('');
-      tab === 'kw' ? kw.refresh() : ex.refresh();
+      await refreshCurrent();
     } catch (e: any) { setMsg({ text: '⚠️ ' + e.message, ok: false }); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setBusyText(null); }
   }
 
   async function remove(id: string) {
-    if (tab === 'kw') { await deleteKeyword(id); kw.refresh(); }
-    else { await deleteExam(id); ex.refresh(); }
+    try {
+      if (tab === 'kw') await deleteKeyword(id);
+      else await deleteExam(id);
+      setMsg({ text: `🗑 ${tab === 'kw' ? '키워드' : '기출문제'} 삭제했어요`, ok: true });
+      await refreshCurrent();
+    } catch (e: any) {
+      setMsg({ text: '⚠️ ' + e.message, ok: false });
+    }
   }
 
   // 현재 탭(키워드/기출)의 데이터를 전부 삭제한다. 확인 모달을 거쳐서만 호출됨.
   async function removeAll() {
     if (!userId || !subjectId) return;
-    setBusy(true); setMsg(null);
+    setBusy(true); setBusyText(`${tab === 'kw' ? '키워드' : '기출문제'} 전체 삭제 중…`); setMsg(null);
     try {
       const r = tab === 'kw'
         ? await deleteAllKeywords(userId, subjectId)
         : await deleteAllExams(userId, subjectId);
+      clearLocalStudyState(userId, subjectId, tab);
       setMsg({ text: `🗑 ${r.deleted}개 모두 삭제했어요`, ok: true });
       setConfirmAll(false);
-      tab === 'kw' ? kw.refresh() : ex.refresh();
+      await refreshCurrent();
     } catch (e: any) { setMsg({ text: '⚠️ ' + e.message, ok: false }); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setBusyText(null); }
   }
 
   // ---- 모달 열기 ----
@@ -196,7 +219,7 @@ export default function DataPage() {
       } else {
         await updateKeyword(kwEdit.id!, payload);
       }
-      setKwEdit(null); kw.refresh();
+      setKwEdit(null); await refreshCurrent();
     } catch (e: any) { setWarn(e.message); }
   }
   async function saveEx() {
@@ -216,7 +239,7 @@ export default function DataPage() {
       } else {
         await updateExam(exEdit.id!, payload);
       }
-      setExEdit(null); ex.refresh();
+      setExEdit(null); await refreshCurrent();
     } catch (e: any) { setWarn(e.message); }
   }
 
@@ -242,13 +265,13 @@ export default function DataPage() {
       </div>
 
       <div style={{ display: 'flex', background: '#eef2f7', borderRadius: 14, padding: 4, marginBottom: 16 }}>
-        <button onClick={() => { setTab('kw'); setMsg(null); }} style={tabBtn(tab === 'kw', '#2563eb')}>키워드 {kw.items.length}</button>
-        <button onClick={() => { setTab('ex'); setMsg(null); }} style={tabBtn(tab === 'ex', '#7c3aed')}>기출문제 {ex.items.length}</button>
+        <button onClick={() => { setTab('kw'); setMsg(null); }} style={tabBtn(tab === 'kw', '#2563eb')}>키워드 {tab === 'kw' && kw.loading ? '…' : keywordCount}</button>
+        <button onClick={() => { setTab('ex'); setMsg(null); }} style={tabBtn(tab === 'ex', '#7c3aed')}>기출문제 {tab === 'ex' && ex.loading ? '…' : examCount}</button>
       </div>
 
       <div style={{ background: '#fff', borderRadius: 18, padding: 15, boxShadow: '0 10px 30px -20px rgba(15,23,42,.25)', marginBottom: 14, borderTop: `4px solid ${accent}` }}>
         <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 9 }}>구글 시트 공유 링크로 불러오기 <b style={{ color: accent }}>· 열 이름으로 자동 인식</b></div>
-        <input value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/..." style={input} />
+        <input value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} disabled={busy} placeholder="https://docs.google.com/spreadsheets/..." style={input} />
         <div style={{ display: 'flex', gap: 8, marginTop: 9, flexWrap: 'wrap' }}>
           <button onClick={loadSheet} disabled={busy} style={{ flex: 1, background: accent, color: '#fff', border: 'none', fontWeight: 900, fontSize: 14, padding: 12, borderRadius: 13, cursor: 'pointer' }}>{busy ? '처리 중…' : '불러오기'}</button>
           {useKoreanHistoryExamPresets ? (
@@ -256,14 +279,14 @@ export default function DataPage() {
               <button
                 onClick={() => loadKoreanHistoryExam('basic')}
                 disabled={busy || subjectsLoading}
-                title="한능검 기출 기본 정제 시트에서 가져옵니다."
+                title="한능검 기본 기출 최종 Google Sheet에서 가져옵니다."
                 style={{ background: '#ede9fe', color: '#6d28d9', border: 'none', fontWeight: 900, fontSize: 13, padding: '12px 14px', borderRadius: 13, cursor: 'pointer' }}
               >기본적재</button>
               <button
                 onClick={() => loadKoreanHistoryExam('advanced')}
-                disabled={busy || subjectsLoading || !KOREAN_HISTORY_ADVANCED_EXAM_SHEET_URL}
-                title={KOREAN_HISTORY_ADVANCED_EXAM_SHEET_URL ? '한능검 심화 기출 시트에서 가져옵니다.' : '심화 시트 URL을 기다리고 있습니다.'}
-                style={{ background: '#f1f5f9', color: '#94a3b8', border: 'none', fontWeight: 900, fontSize: 13, padding: '12px 14px', borderRadius: 13, cursor: KOREAN_HISTORY_ADVANCED_EXAM_SHEET_URL ? 'pointer' : 'not-allowed', opacity: KOREAN_HISTORY_ADVANCED_EXAM_SHEET_URL ? 1 : .7 }}
+                disabled={busy || subjectsLoading}
+                title="한능검 심화 기출 최종 Google Sheet에서 가져옵니다."
+                style={{ background: '#fae8ff', color: '#a21caf', border: 'none', fontWeight: 900, fontSize: 13, padding: '12px 14px', borderRadius: 13, cursor: 'pointer' }}
               >심화적재</button>
             </>
           ) : (
@@ -271,12 +294,15 @@ export default function DataPage() {
               onClick={loadDefault}
               disabled={busy || subjectsLoading}
               title={useKoreanHistoryKeywordSheet ? '한능검 마스터 Google Sheet에서 키워드를 가져옵니다.' : useEnglishKeywordSheet ? '영어 단어 마스터 Google Sheet에서 키워드를 가져옵니다.' : '앱에 포함된 실습용 샘플을 추가합니다.'}
-              style={{ background: '#eef2f7', color: '#334155', border: 'none', fontWeight: 900, fontSize: 13, padding: '12px 14px', borderRadius: 13, cursor: 'pointer' }}
+              style={useKoreanHistoryKeywordSheet
+                ? { background: '#dbeafe', color: '#1d4ed8', border: 'none', fontWeight: 900, fontSize: 13, padding: '12px 14px', borderRadius: 13, cursor: 'pointer' }
+                : { background: '#eef2f7', color: '#334155', border: 'none', fontWeight: 900, fontSize: 13, padding: '12px 14px', borderRadius: 13, cursor: 'pointer' }}
             >{useKoreanHistoryKeywordSheet ? '암기코드 적재' : useEnglishKeywordSheet ? '단어 적재' : '기본데이터'}</button>
           )}
           <button onClick={openAdd} style={{ background: tint, color: accent, border: 'none', fontWeight: 900, fontSize: 13, padding: '12px 14px', borderRadius: 13, cursor: 'pointer' }}>＋ 직접 추가</button>
         </div>
-        {msg && <div style={{ marginTop: 10, fontSize: 12.5, fontWeight: 700, color: msg.ok ? '#16a34a' : '#dc2626', background: msg.ok ? '#dcfce7' : '#fef2f2', padding: '10px 12px', borderRadius: 11, lineHeight: 1.45 }}>{msg.text}</div>}
+        {busyText && <div aria-live="polite" style={{ marginTop: 10, fontSize: 12.5, fontWeight: 800, color: '#4338ca', background: '#eef2ff', padding: '10px 12px', borderRadius: 11 }}>⏳ {busyText}</div>}
+        {msg && <div aria-live="polite" style={{ marginTop: 10, fontSize: 12.5, fontWeight: 700, color: msg.ok ? '#16a34a' : '#dc2626', background: msg.ok ? '#dcfce7' : '#fef2f2', padding: '10px 12px', borderRadius: 11, lineHeight: 1.45 }}>{msg.text}</div>}
       </div>
 
       {/* ---- 조회: 검색 + 시대 필터 ---- */}
@@ -309,7 +335,8 @@ export default function DataPage() {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {total === 0 && <div style={{ textAlign: 'center', color: '#94a3b8', fontWeight: 700, fontSize: 13, padding: '24px 0' }}>아직 등록된 항목이 없어요. ‘기본데이터’나 ‘＋ 직접 추가’로 시작하세요.</div>}
+        {currentLoading && <div aria-live="polite" style={{ textAlign: 'center', color: '#6366f1', fontWeight: 800, fontSize: 13, padding: '24px 0' }}>⏳ 데이터를 불러오는 중…</div>}
+        {!currentLoading && total === 0 && <div style={{ textAlign: 'center', color: '#94a3b8', fontWeight: 700, fontSize: 13, padding: '24px 0' }}>아직 등록된 항목이 없어요. ‘기본데이터’나 ‘＋ 직접 추가’로 시작하세요.</div>}
         {total > 0 && list.length === 0 && <div style={{ textAlign: 'center', color: '#94a3b8', fontWeight: 700, fontSize: 13, padding: '24px 0' }}>조건에 맞는 항목이 없어요. 검색어나 필터를 바꿔 보세요.</div>}
         {tab === 'kw' && filteredKw.slice(0, visibleCount).map((k) => (
           <Row key={k.id} accent={accent} tint={tint} era={k.era} day={k.day} imp={k.importance ?? 2} title={k.code} sub={k.concept}
@@ -390,7 +417,7 @@ export default function DataPage() {
 // 목록 한 줄. 긴 텍스트는 2줄로 접어 보여주고, 본문을 탭하면 전체 내용(연상법·보기·해설)이 펼쳐진다.
 const Row = ({ accent, tint, era, day, imp, title, sub, detail, expanded, onToggle, onEdit, onDelete }: { accent: string; tint: string; era: string; day: string; imp: number; title: string; sub: string; detail: string; expanded: boolean; onToggle: () => void; onEdit: () => void; onDelete: () => void }) => (
   <div style={{ background: '#fff', borderRadius: 15, padding: '13px 14px', boxShadow: '0 6px 18px -14px rgba(15,23,42,.3)', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-    <div onClick={onToggle} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>
+    <button onClick={onToggle} aria-expanded={expanded} style={{ flex: 1, minWidth: 0, display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer' }}>
       <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap' }}>
         <span style={{ fontSize: 12, fontWeight: 800, color: accent, background: tint, padding: '3px 10px', borderRadius: 99 }}>{era}</span>
         {day && <span style={{ fontSize: 12, fontWeight: 800, color: '#64748b', background: '#f1f5f9', padding: '3px 10px', borderRadius: 99 }}>{day}</span>}
@@ -402,7 +429,7 @@ const Row = ({ accent, tint, era, day, imp, title, sub, detail, expanded, onTogg
         <div style={{ fontSize: 14, color: '#475569', fontWeight: 600, marginTop: 8, background: '#f8fafc', borderRadius: 11, padding: '11px 13px', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>{detail}</div>
       )}
       <div style={{ fontSize: 12, color: '#cbd5e1', fontWeight: 700, marginTop: 5 }}>{expanded ? '▲ 접기' : '▼ 자세히'}</div>
-    </div>
+    </button>
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
       <button onClick={onEdit} style={{ width: 38, height: 38, borderRadius: 10, background: '#eff6ff', color: '#2563eb', border: 'none', cursor: 'pointer', fontSize: 15 }}>✏️</button>
       <button onClick={onDelete} style={{ width: 38, height: 38, borderRadius: 10, background: '#fef2f2', color: '#dc2626', border: 'none', cursor: 'pointer', fontSize: 15 }}>🗑</button>
@@ -479,5 +506,5 @@ const clamp2: React.CSSProperties = { display: '-webkit-box', WebkitLineClamp: 2
 // 모달 공통 오버레이 — 반드시 fixed (화면 기준). absolute 를 쓰면 목록이 긴 페이지에서 모달이 화면 밖으로 밀려난다.
 const overlay: React.CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 40, padding: 16 };
 const tabBtn = (active: boolean, c: string): React.CSSProperties => ({ flex: 1, textAlign: 'center', fontSize: 14, fontWeight: 900, padding: 10, borderRadius: 11, border: 'none', cursor: 'pointer', background: active ? '#fff' : 'transparent', color: active ? c : '#94a3b8' });
-const backBtn: React.CSSProperties = { width: 38, height: 38, borderRadius: 12, background: '#fff', border: 'none', fontSize: 18, color: '#334155', cursor: 'pointer', boxShadow: '0 6px 16px -10px rgba(15,23,42,.4)', flexShrink: 0 };
+const backBtn: React.CSSProperties = { width: 44, height: 44, borderRadius: 12, background: '#fff', border: 'none', fontSize: 18, color: '#334155', cursor: 'pointer', boxShadow: '0 6px 16px -10px rgba(15,23,42,.4)', flexShrink: 0 };
 const input: React.CSSProperties = { width: '100%', border: '2px solid #e2e8f0', borderRadius: 13, padding: '12px 14px', fontSize: 14.5, fontWeight: 600, color: '#0f172a', outline: 'none', fontFamily: 'inherit' };

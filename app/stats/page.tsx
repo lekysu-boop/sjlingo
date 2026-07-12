@@ -10,13 +10,13 @@ import type { UserProgress, Profile } from '@/lib/types';
 // 통계·응원 화면: 모든 사용자의 진도율 카드 + 선택 사용자의 월간 차트 + 응원.
 export default function StatsPage() {
   const router = useRouter();
-  const { userId } = useSession();
+  const { userId, ready } = useSession();
   const { users } = useUser();
   const [progress, setProgress] = useState<Record<string, UserProgress>>({});
   const [selected, setSelected] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null); // 응원 제한 등 안내 메시지
 
-  useEffect(() => { if (userId === null) router.replace('/'); }, [userId, router]);
+  useEffect(() => { if (ready && userId === null) router.replace('/'); }, [ready, userId, router]);
 
   // 모든 사용자 진도 병렬 로드
   useEffect(() => {
@@ -35,6 +35,8 @@ export default function StatsPage() {
     try {
       const r = await sendCheer(id, userId ?? undefined);
       setProgress((p) => ({ ...p, [id]: { ...(p[id] as UserProgress), cheers: r.cheers } }));
+      setToast('응원을 보냈어요! 👏');
+      setTimeout(() => setToast(null), 2000);
     } catch (e: any) {
       // 자기 응원 금지 / 하루 2회 제한 등 서버 메시지를 그대로 보여준다
       setToast(e.message);
@@ -67,10 +69,11 @@ export default function StatsPage() {
                   <span style={{ fontSize: 26 }}>{u.emoji}</span>
                   <span>
                     <span style={{ display: 'block', fontWeight: 900, color: '#0f172a', textAlign: 'left' }}>{u.name}</span>
-                    <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700 }}>키워드 {p?.kwRate ?? 0}% · 기출 {p?.exRate ?? 0}%</span>
+                    {/* p === undefined면 아직 조회 전(로딩 중) — 0%와 헷갈리지 않게 구분해서 보여준다 */}
+                    <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700 }}>{p === undefined ? '불러오는 중…' : `키워드 ${p.kwRate}% · 기출 ${p.exRate}%`}</span>
                   </span>
                 </button>
-                <Ring pct={p?.overall ?? 0} color={u.color} />
+                {p !== undefined && <Ring pct={p.overall} color={u.color} />}
               </div>
               <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
                 <button onClick={() => setSelected(u.id)} style={{ ...smallBtn, background: '#f8fafc', color: '#475569' }}>📊 진도 상세</button>
@@ -180,6 +183,6 @@ const Stat = ({ big, label, sub, c, bg }: { big: string; label: string; sub: str
   </div>
 );
 
-const iconBtn: React.CSSProperties = { width: 38, height: 38, borderRadius: 12, background: '#fff', border: 'none', fontSize: 18, color: '#334155', cursor: 'pointer', boxShadow: '0 6px 16px -10px rgba(15,23,42,.4)' };
+const iconBtn: React.CSSProperties = { width: 44, height: 44, borderRadius: 12, background: '#fff', border: 'none', fontSize: 18, color: '#334155', cursor: 'pointer', boxShadow: '0 6px 16px -10px rgba(15,23,42,.4)' };
 const bare: React.CSSProperties = { background: 'none', border: 'none', padding: 0 };
 const smallBtn: React.CSSProperties = { flex: 1, textAlign: 'center', fontWeight: 800, fontSize: 12.5, padding: 9, borderRadius: 11, border: 'none', cursor: 'pointer' };

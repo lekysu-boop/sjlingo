@@ -17,7 +17,7 @@ import { playChest } from '@/lib/sound';
 // useGamification 훅의 결과를 조립하는 Dashboard(View) 역할을 합니다.
 export default function HomePage() {
   const router = useRouter();
-  const { userId, subjectId, setUserId, setSubjectId } = useSession();
+  const { userId, subjectId, setUserId, setSubjectId, ready } = useSession();
   const { users } = useUser();
   const { subjects, currentId, setCurrentId, add } = useSubjects(userId, subjectId);
   const summary = useStudySummary(userId, subjectId);
@@ -29,9 +29,16 @@ export default function HomePage() {
   const [questOpen, setQuestOpen] = useState(false); // 퀘스트 상세 펼침 (기본: 접힘)
   const [chest, setChest] = useState<{ tier: string; coins: number } | null>(null);
   const [claiming, setClaiming] = useState(false);
+  const [claimError, setClaimError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!claimError) return;
+    const t = setTimeout(() => setClaimError(null), 3000);
+    return () => clearTimeout(t);
+  }, [claimError]);
 
   // 로그인 안 됐으면 로그인으로
-  useEffect(() => { if (userId === null) router.replace('/'); }, [userId, router]);
+  useEffect(() => { if (ready && userId === null) router.replace('/'); }, [ready, userId, router]);
   // 과목 훅의 선택을 세션에 동기화
   useEffect(() => { if (currentId && currentId !== subjectId) setSubjectId(currentId); }, [currentId]); // eslint-disable-line
   useEffect(() => { setQuestDay(loadQuestDay(userId)); }, [userId]);
@@ -45,15 +52,17 @@ export default function HomePage() {
   // 퀘스트 보상 수령 → 서버가 상자 등급·코인을 추첨해 지급
   async function onClaim(questId: string) {
     if (!userId || claiming) return;
-    setClaiming(true);
+    setClaiming(true); setClaimError(null);
     try {
       const r = await claimQuest(userId, questId);
       markClaimed(userId, questId);
       setQuestDay(loadQuestDay(userId));
       playChest();
       setChest({ tier: r.tier, coins: r.coins });
-      gam.refresh(); // HUD 코인 갱신
-    } catch {}
+      gam.applyState(r.state); // 응답에 이미 최신 상태가 있어 재조회 없이 HUD 코인 갱신
+    } catch {
+      setClaimError('보상을 받지 못했어요. 다시 시도해 주세요.');
+    }
     finally { setClaiming(false); }
   }
 
@@ -116,6 +125,9 @@ export default function HomePage() {
                   </div>
                 );
               })}
+              {claimError && (
+                <div aria-live="polite" style={{ marginTop: 6, fontSize: 12.5, fontWeight: 800, color: '#dc2626', background: '#fef2f2', padding: '9px 12px', borderRadius: 11 }}>⚠️ {claimError}</div>
+              )}
             </div>
           )}
         </div>

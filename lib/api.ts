@@ -76,7 +76,7 @@ export const sendCheer = (toId: string, fromId?: string) =>
 // ---- 구글 시트 가져오기 ----
 export const importSheet = (userId: string, subjectId: string, kind: 'keyword' | 'exam', url: string) =>
   fetch('/api/import/sheet', { method: 'POST', body: JSON.stringify({ userId, subjectId, kind, url }) })
-    .then(j<{ added: number; skipped: number; parsed: number }>);
+    .then(j<{ added: number; skipped: number; parsed: number; rejected?: number }>);
 
 // ---- 게이미피케이션 ----
 export const getGamify = (userId: string) =>

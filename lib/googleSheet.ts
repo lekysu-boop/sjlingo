@@ -9,12 +9,10 @@
 // ============================================================================
 
 const SHEET_ID_DEFAULT_GID: Record<string, string> = {
-  // 한능검 기출 기본 소스는 첫 탭(TOC) 대신 실제 데이터 탭 gid를 사용해야 합니다.
-  '1nb5gkJcjacVIvY1U2bVnZKnaDv6bCT_NNEM6IM-MpN0': '1701503140',
-  // 한능검 암기코드 마스터도 첫 탭 대신 실제 데이터 탭을 지정합니다.
-  '1hoa0tTf635b3R9CN8_99M9uyprXu0eyCy3ObxvAy5Po': '2484287',
-  // 한능검 기출 심화 소스도 첫 탭(TOC) 대신 실제 데이터 탭 gid를 사용해야 합니다.
-  '1XeGq_LLoXL7y86PXY_lJFr26Y2y2RzVtkskU9r0Gzj8': '309850618',
+  // 현재 한국사 최종본 세 문서는 첫 탭(gid=0)이 실제 적재 대상입니다.
+  '1U1CjPfvykkcGrWTyt__RgCHMhuqSvlRygPtmoXCkafU': '0',
+  '1lmQ3bFWvlQl7M8S0M9DBSf1TQlW2uGIQs2TElrToB2I': '0',
+  '1O_f_xTbwFByE52a86pfNCAQbTIGofkcwmmfaCSdno2o': '0',
 };
 
 /** Google Sheets 공유 URL을 공개 CSV 내보내기 URL로 바꿉니다. */
