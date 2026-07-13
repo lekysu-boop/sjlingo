@@ -18,6 +18,23 @@ export function isKoreanHistorySubject(name?: string | null): boolean {
   return normalized.includes('한국사') || normalized.includes('한능검');
 }
 
+// 한국사 기본 시트(한능검_암기코드_최종통합본)에 실제로 등장하는 시대 순서.
+// 학습 범위 칩을 등록 순서(=데이터 양 순으로 보이기 쉬움) 대신 실제 역사 흐름대로 보여주기 위한 기준.
+export const KOREAN_HISTORY_ERA_ORDER = [
+  '선사시대', '고조선', '여러 나라의 성장', '삼국 및 가야', '남북국 시대',
+  '고려 시대', '조선 시대', '근대 개항기', '일제 강점기', '현대사',
+];
+
+// 학습범위 칩 정렬: 한국사 과목만 시대순으로 재배열하고, 그 외 과목은 등록 순서를 그대로 둔다.
+// eras[0]은 항상 '전체'이므로 그대로 맨 앞에 두고, 기준 목록에 없는 값(사용자 직접 입력 등)은 뒤에 그대로 붙인다.
+export function sortEras(eras: string[], isKoreanHistory: boolean): string[] {
+  if (!isKoreanHistory) return eras;
+  const [all, ...rest] = eras;
+  const known = KOREAN_HISTORY_ERA_ORDER.filter((e) => rest.includes(e));
+  const unknown = rest.filter((e) => !KOREAN_HISTORY_ERA_ORDER.includes(e));
+  return all === undefined ? [...known, ...unknown] : [all, ...known, ...unknown];
+}
+
 // 영어 단어 키워드 마스터 시트. 탭이 하나뿐이라 gid=0(첫 탭) 그대로 사용합니다.
 export const ENGLISH_WORD_KEYWORD_SHEET_URL =
   'https://docs.google.com/spreadsheets/d/11dAo2NXz17xBz9ve7m5HEkF-ybPXinqCaIqgJoMNgUM/edit?usp=sharing#gid=0';

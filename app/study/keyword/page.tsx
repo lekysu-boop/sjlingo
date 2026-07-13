@@ -14,7 +14,7 @@ import { loadSrs, saveSrs, srsReview, dueItems, type SrsMap } from '@/lib/srs';
 import { bumpQuestSession, bumpQuestCombo } from '@/lib/quests';
 import { playCorrect, playCombo, playWrong, playFinish, isSoundOn, toggleSound } from '@/lib/sound';
 import { loadDefaultKeywords } from '@/lib/defaultDataLoad';
-import { isKoreanHistorySubject, isEnglishWordSubject } from '@/lib/defaultData';
+import { isKoreanHistorySubject, isEnglishWordSubject, sortEras } from '@/lib/defaultData';
 import type { Keyword } from '@/lib/types';
 
 type Phase = 'setup' | 'session' | 'done';
@@ -31,14 +31,17 @@ export default function KeywordStudyPage() {
   const router = useRouter();
   const { userId, subjectId, ready } = useSession();
   const { current: currentSubject } = useSubjects(userId, subjectId);
-  const { items, eras, loading, refresh: refreshKeywords } = useKeywords(userId, subjectId);
+  const { items, eras: rawEras, loading, refresh: refreshKeywords } = useKeywords(userId, subjectId);
   const gam = useGamification(userId);
+  const isKoreanHistory = isKoreanHistorySubject(currentSubject?.name);
+  // 학습범위 칩: 한국사는 등록 순서 대신 실제 시대 흐름 순으로 보여준다.
+  const eras = useMemo(() => sortEras(rawEras, isKoreanHistory), [rawEras, isKoreanHistory]);
 
   // 화면 진입 시 등록된 키워드가 하나도 없으면, 데이터 관리로 나가지 않고
   // 이 자리에서 바로 기본 데이터를 불러올 수 있게 한다.
   const [loadingDefault, setLoadingDefault] = useState(false);
   const [loadDoneMsg, setLoadDoneMsg] = useState<string | null>(null);
-  const defaultKeywordLabel = isKoreanHistorySubject(currentSubject?.name)
+  const defaultKeywordLabel = isKoreanHistory
     ? '한국사 암기코드'
     : isEnglishWordSubject(currentSubject?.name)
       ? '영어 단어'

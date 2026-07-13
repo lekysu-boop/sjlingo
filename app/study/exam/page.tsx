@@ -12,7 +12,7 @@ import { pickRotating } from '@/lib/rotation';
 import { heartCost } from '@/lib/gamify';
 import { balanceAnswers } from '@/lib/examShuffle';
 import { generateExamFromKeywords, isSyntheticExamId } from '@/lib/examGen';
-import { isEnglishWordSubject, isKoreanHistorySubject } from '@/lib/defaultData';
+import { isEnglishWordSubject, isKoreanHistorySubject, sortEras } from '@/lib/defaultData';
 import { loadDefaultExam } from '@/lib/defaultDataLoad';
 import { parseQuestionDisplay } from '@/lib/examDisplay';
 import { bumpQuestSession, bumpQuestCombo } from '@/lib/quests';
@@ -72,9 +72,10 @@ export default function ExamStudyPage() {
     [examItems.length, isEnglishWord, kw.items],
   );
   const items = examItems.length ? examItems : generatedItems;
+  // 학습범위 칩: 한국사는 등록 순서 대신 실제 시대 흐름 순으로 보여준다.
   const eras = useMemo(
-    () => (examItems.length ? examEras : Array.from(new Set(['전체', ...generatedItems.map((q) => q.era)]))),
-    [examItems.length, examEras, generatedItems],
+    () => sortEras(examItems.length ? examEras : Array.from(new Set(['전체', ...generatedItems.map((q) => q.era)])), isKoreanHistory),
+    [examItems.length, examEras, generatedItems, isKoreanHistory],
   );
   const dataLoading = examsLoading || (isEnglishWord && kw.loading);
   const eraCounts = useMemo(() => {
