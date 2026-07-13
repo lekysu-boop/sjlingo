@@ -6,9 +6,10 @@ import { useSubjects } from '@/hooks/useSubjects';
 import { useKeywords } from '@/hooks/useKeywords';
 import { useGamification } from '@/hooks/useGamification';
 import { recordKeyword, recordSession } from '@/lib/api';
-import { GamifyStyles, GamifyHud, Confetti, XpFloat, ComboBadge, Mascot } from '@/components/Gamify';
+import { GamifyStyles, GamifyHud, HeartsGate, Confetti, XpFloat, ComboBadge, Mascot } from '@/components/Gamify';
 import { frontCode, GameMode } from '@/lib/gamemode';
 import { pickRotating } from '@/lib/rotation';
+import { heartCost } from '@/lib/gamify';
 import { loadSrs, saveSrs, srsReview, dueItems, type SrsMap } from '@/lib/srs';
 import { bumpQuestSession, bumpQuestCombo } from '@/lib/quests';
 import { playCorrect, playCombo, playWrong, playFinish, isSoundOn, toggleSound } from '@/lib/sound';
@@ -76,10 +77,13 @@ export default function KeywordStudyPage() {
   const [again, setAgain] = useState(0);
   const [combo, setCombo] = useState(0);
   const [wrongStreak, setWrongStreak] = useState(0); // 연속 오답 수 (마스코트 위로 메시지용)
-  // 세션 하트: 학습을 시작할 때마다 5개로 리셋, 틀리면 1개 소모. 0이면 세션 종료.
+  // 세션 하트: 학습을 시작할 때마다 5개로 리셋. 틀리면 중요도 상=1개, 중/하=0.5개 소모.
+  // 0이 되면 계속할지 묻고(gate), "그만하기"를 고르면 그 자리에서 세션을 종료한다.
   const [hearts, setHearts] = useState(5);
   const [heartBreak, setHeartBreak] = useState<number | null>(null);
   const [endedByHearts, setEndedByHearts] = useState(false);
+  const [heartsExhausted, setHeartsExhausted] = useState(false); // 이미 한 번 계속하기를 선택했는지 (재확인 방지)
+  const [heartsGate, setHeartsGate] = useState<{ finalKnown: number; nextIdx: number } | null>(null);
   const [earnedCoins, setEarnedCoins] = useState(0); // 이번 세션 공부시간 코인
   const [masks, setMasks] = useState<string[]>([]);
   // 망각곡선(SRS) 상태: keywordId → { box, due }. localStorage 에서 불러온다.
@@ -131,6 +135,7 @@ export default function KeywordStudyPage() {
     setMasks(pool.map((c) => frontCode(c.code, mode))); // partial 마스크를 카드별로 한 번 고정
     setIdx(0); setFlipped(false); setKnown(0); setAgain(0); setCombo(0); setWrongStreak(0);
     setHearts(5); setEndedByHearts(false); setEarnedCoins(0); // 세션 하트 리셋
+    setHeartsExhausted(false); setHeartsGate(null);
     startedAt.current = Date.now();
     setPhase('session');
   }
@@ -165,8 +170,8 @@ export default function KeywordStudyPage() {
       c >= 3 ? playCombo() : playCorrect();
     } else {
       setWrongStreak((w) => w + 1);
-      // 세션 하트 1개 소모 + 깨지는 애니메이션
-      heartsLeft = hearts - 1;
+      // 세션 하트 소모(중요도 상=1개, 중/하=0.5개) + 깨지는 애니메이션
+      heartsLeft = Math.max(0, hearts - heartCost(card.importance ?? 2));
       setHearts(heartsLeft);
       setHeartBreak(heartsLeft);
       setTimeout(() => setHeartBreak(null), 600);
@@ -175,11 +180,26 @@ export default function KeywordStudyPage() {
     }
 
     const finalKnown = known + (isKnown ? 1 : 0);
-    if (heartsLeft <= 0) {
-      finishSession(finalKnown, idx + 1, true); // 하트 소진 → 여기까지 푼 것만 기록
-    } else if (idx + 1 >= deck.length) {
+    const nextIdx = idx + 1;
+    if (!isKnown && heartsLeft <= 0 && !heartsExhausted && nextIdx < deck.length) {
+      // 하트가 처음 바닥났고 아직 남은 카드가 있으면 계속할지 물어본다
+      setHeartsGate({ finalKnown, nextIdx });
+    } else if (nextIdx >= deck.length) {
       finishSession(finalKnown, deck.length, false);
-    } else { setIdx(idx + 1); setFlipped(false); }
+    } else { setIdx(nextIdx); setFlipped(false); }
+  }
+
+  function continueAfterHeartsGate() {
+    if (!heartsGate) return;
+    setHeartsExhausted(true);
+    setIdx(heartsGate.nextIdx); setFlipped(false);
+    setHeartsGate(null);
+  }
+
+  function stopAfterHeartsGate() {
+    if (!heartsGate) return;
+    finishSession(heartsGate.finalKnown, heartsGate.nextIdx, true); // 여기까지 푼 것만 기록
+    setHeartsGate(null);
   }
 
   const card = deck[idx];
@@ -197,6 +217,7 @@ export default function KeywordStudyPage() {
         <button onClick={() => setSound(toggleSound())} style={iconBtn} title="효과음 켜기/끄기">{sound ? '🔊' : '🔇'}</button>
       </div>
       {phase === 'session' && <div style={{ marginBottom: 14 }}><GamifyHud state={gam.state} hearts={hearts} heartBreakIdx={heartBreak} /></div>}
+      {heartsGate && <HeartsGate onContinue={continueAfterHeartsGate} onStop={stopAfterHeartsGate} />}
 
       {phase === 'setup' && loadDoneMsg && (
         <div aria-live="polite" style={{ marginBottom: 14, fontSize: 12.5, fontWeight: 800, color: loadDoneMsg.startsWith('⚠️') ? '#dc2626' : '#16a34a', background: loadDoneMsg.startsWith('⚠️') ? '#fef2f2' : '#dcfce7', padding: '10px 12px', borderRadius: 11 }}>{loadDoneMsg}</div>

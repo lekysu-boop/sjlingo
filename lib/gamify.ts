@@ -28,6 +28,11 @@ export function xpFor(combo: number, base = 10): number {
   return base + (combo >= 3 ? 5 : 0);
 }
 
+// 오답 시 깎이는 하트 양: 중요도 상(3)은 1개, 중/하(1~2)는 0.5개
+export function heartCost(importance: number): number {
+  return importance >= 3 ? 1 : 0.5;
+}
+
 // 시간 경과에 따른 하트 회복량 계산
 export function regenHearts(hearts: number, updatedISO: string, now = new Date()): { hearts: number; updatedISO: string } {
   if (hearts >= MAX_HEARTS) return { hearts, updatedISO: now.toISOString() };

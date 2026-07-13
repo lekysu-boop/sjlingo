@@ -7,8 +7,9 @@ import { useKeywords } from '@/hooks/useKeywords';
 import { useExams } from '@/hooks/useExams';
 import { useGamification } from '@/hooks/useGamification';
 import { recordAttempt, recordSession, wrongExamIds } from '@/lib/api';
-import { GamifyStyles, GamifyHud, Confetti, XpFloat, ComboBadge, Mascot } from '@/components/Gamify';
+import { GamifyStyles, GamifyHud, HeartsGate, Confetti, XpFloat, ComboBadge, Mascot } from '@/components/Gamify';
 import { pickRotating } from '@/lib/rotation';
+import { heartCost } from '@/lib/gamify';
 import { balanceAnswers } from '@/lib/examShuffle';
 import { generateExamFromKeywords, isSyntheticExamId } from '@/lib/examGen';
 import { isEnglishWordSubject, isKoreanHistorySubject } from '@/lib/defaultData';
@@ -97,10 +98,13 @@ export default function ExamStudyPage() {
   const [wrong, setWrong] = useState(0);
   const [combo, setCombo] = useState(0);
   const [wrongStreak, setWrongStreak] = useState(0); // 연속 오답 수 (마스코트 위로 메시지용)
-  // 세션 하트: 학습을 시작할 때마다 10개로 리셋, 틀리면 1개 소모(0 밑으로는 내려가지 않음).
-  // 다 떨어져도 세션은 끝나지 않고 계속 풀 수 있다 — 순수 피드백용 표시.
+  // 세션 하트: 학습을 시작할 때마다 5개로 리셋. 틀리면 중요도 상=1개, 중/하=0.5개 소모
+  // (0 밑으로는 내려가지 않음). 0이 되면 계속할지 묻고, "그만하기"를 고르면 그 자리에서 종료한다.
   const [hearts, setHearts] = useState(MAX_HEARTS);
   const [heartBreak, setHeartBreak] = useState<number | null>(null);
+  const [heartsExhausted, setHeartsExhausted] = useState(false); // 이미 한 번 계속하기를 선택했는지 (재확인 방지)
+  const [heartsGate, setHeartsGate] = useState(false);
+  const [endedByHearts, setEndedByHearts] = useState(false);
   const [earnedCoins, setEarnedCoins] = useState(0); // 이번 세션 공부시간 코인
   const [missed, setMissed] = useState<ExamQuestion[]>([]); // 결과 화면에서 오답 복기용
   const [sound, setSound] = useState(true);
@@ -144,21 +148,23 @@ export default function ExamStudyPage() {
     const pool = balanceAnswers(result.picked);
     setDeck(pool); setIdx(0); setPick(null); setCorrect(0); setWrong(0); setCombo(0); setWrongStreak(0);
     setHearts(MAX_HEARTS); setMissed([]); setEarnedCoins(0); // 세션 하트 리셋
+    setHeartsExhausted(false); setHeartsGate(false); setEndedByHearts(false);
     startedAt.current = Date.now();
     setPhase('session');
   }
 
-  // 세션 종료 공통 처리: 스트릭·시간 코인·퀘스트·통계 기록. 하트가 다 떨어져도 끝까지
-  // 풀 수 있으므로, 세션은 항상 deck을 전부 풀었을 때만 끝난다.
-  function finishSession(finalCorrect: number) {
+  // 세션 종료 공통 처리: 스트릭·시간 코인·퀘스트·통계 기록.
+  // attempted: 실제로 푼 문항 수 (하트 소진으로 중단하면 deck.length보다 작을 수 있음)
+  function finishSession(finalCorrect: number, attempted: number, byHearts = false) {
     const durationSec = Math.round((Date.now() - startedAt.current) / 1000);
+    setEndedByHearts(byHearts);
     setPhase('done');
     gam.completeSession(durationSec / 60).then((r) => setEarnedCoins(r?.gainedCoins ?? 0));
     bumpQuestSession(userId);
     playFinish();
     // 세션 결과 기록 → 통계(공부시간·가중평균)와 리그 순위의 원천
     if (userId && subjectId) {
-      recordSession({ userId, subjectId, kind: 'ex', total: deck.length, correct: finalCorrect, durationSec }).catch(() => {});
+      recordSession({ userId, subjectId, kind: 'ex', total: attempted, correct: finalCorrect, durationSec }).catch(() => {});
       // 오답 목록 갱신 (이번 세션에서 맞힌 오답은 목록에서 빠짐)
       wrongExamIds(userId).then((r) => setWrongIds(new Set(r.wrongIds))).catch(() => {});
     }
@@ -176,9 +182,8 @@ export default function ExamStudyPage() {
       c >= 3 ? playCombo() : playCorrect();
     } else {
       setWrongStreak((w) => w + 1);
-      // 세션 하트 1개 소모(0 밑으로는 안 내려감) + 깨지는 애니메이션. 하트가 다
-      // 떨어져도 세션을 막지 않고 계속 풀 수 있다 — 순수 피드백용.
-      const left = Math.max(0, hearts - 1);
+      // 세션 하트 소모(중요도 상=1개, 중/하=0.5개, 0 밑으로는 안 내려감) + 깨지는 애니메이션
+      const left = Math.max(0, hearts - heartCost(q.importance ?? 2));
       setHearts(left);
       setHeartBreak(left);
       setTimeout(() => setHeartBreak(null), 600);
@@ -191,9 +196,24 @@ export default function ExamStudyPage() {
   }
 
   function next() {
-    if (idx + 1 >= deck.length) {
-      finishSession(correct);
-    } else { setIdx(idx + 1); setPick(null); }
+    const isLast = idx + 1 >= deck.length;
+    if (!isLast && hearts <= 0 && !heartsExhausted) {
+      // 하트가 처음 바닥났고 아직 남은 문제가 있으면 계속할지 물어본다
+      setHeartsGate(true);
+      return;
+    }
+    if (isLast) { finishSession(correct, deck.length); } else { setIdx(idx + 1); setPick(null); }
+  }
+
+  function continueAfterHeartsGate() {
+    setHeartsExhausted(true);
+    setHeartsGate(false);
+    if (idx + 1 >= deck.length) { finishSession(correct, deck.length); } else { setIdx(idx + 1); setPick(null); }
+  }
+
+  function stopAfterHeartsGate() {
+    setHeartsGate(false);
+    finishSession(correct, idx + 1, true); // 여기까지 푼 것만 기록
   }
 
   const q = deck[idx];
@@ -216,6 +236,7 @@ export default function ExamStudyPage() {
         <button onClick={() => setSound(toggleSound())} style={iconBtn} title="효과음 켜기/끄기">{sound ? '🔊' : '🔇'}</button>
       </div>
       {phase === 'session' && <div style={{ marginBottom: 14 }}><GamifyHud state={gam.state} hearts={hearts} maxHearts={MAX_HEARTS} heartBreakIdx={heartBreak} /></div>}
+      {heartsGate && <HeartsGate onContinue={continueAfterHeartsGate} onStop={stopAfterHeartsGate} />}
 
       {phase === 'setup' && loadDoneMsg && (
         <div aria-live="polite" style={{ marginBottom: 14, fontSize: 12.5, fontWeight: 800, color: loadDoneMsg.startsWith('⚠️') ? '#dc2626' : '#16a34a', background: loadDoneMsg.startsWith('⚠️') ? '#fef2f2' : '#dcfce7', padding: '10px 12px', borderRadius: 11 }}>{loadDoneMsg}</div>
@@ -353,8 +374,9 @@ export default function ExamStudyPage() {
       {phase === 'done' && (
         <div style={{ ...resultCard, position: 'relative', overflow: 'hidden' }}>
           <Confetti trigger={1} count={28} loop />
-          <div style={{ fontSize: 44, animation: 'gm-jump 1.3s ease-in-out infinite', zIndex: 1 }}>🏆</div>
-          <div style={{ fontSize: 22, fontWeight: 900, color: '#0f172a', zIndex: 1 }}>기출 풀이 완료!</div>
+          <div style={{ fontSize: 44, animation: 'gm-jump 1.3s ease-in-out infinite', zIndex: 1 }}>{endedByHearts ? '💔' : '🏆'}</div>
+          <div style={{ fontSize: 22, fontWeight: 900, color: '#0f172a', zIndex: 1 }}>{endedByHearts ? '하트를 다 썼어요!' : '기출 풀이 완료!'}</div>
+          {endedByHearts && <div style={{ fontSize: 13, fontWeight: 700, color: '#94a3b8', zIndex: 1 }}>조금 쉬었다가 다시 도전해요 💪 (푼 만큼은 기록됐어요)</div>}
           <div style={{ fontSize: 15, fontWeight: 800, color: '#7c3aed', zIndex: 1 }}>정답률 {Math.round((correct / Math.max(1, correct + wrong)) * 100)}%</div>
           {gam.state && <div style={{ fontSize: 13.5, fontWeight: 800, color: '#ea580c', zIndex: 1 }}>🔥 {gam.state.streak}일 연속{earnedCoins > 0 ? ` · 🪙 +${earnedCoins} (공부시간 보상)` : ''}</div>}
           <div style={{ display: 'flex', gap: 12, margin: '10px 0', zIndex: 1 }}>

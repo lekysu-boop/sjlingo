@@ -94,12 +94,36 @@ export function GamifyHud({ state, hearts, maxHearts = 5, heartBreakIdx }: { sta
       {hearts !== undefined && (
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
           {Array.from({ length: maxHearts }, (_, i) => {
-            const filled = i < hearts;
-            const breaking = heartBreakIdx != null && i === hearts;
-            return <span key={i} style={{ fontSize: 18, animation: breaking ? 'gm-heartbreak .5s ease forwards' : 'none', display: 'inline-block' }}>{filled ? '❤️' : '🤍'}</span>;
+            // fill: 1=꽉 찬 하트, 0.5=중요도 중/하 오답 절반 차감된 하트, 0=빈 하트
+            const fill = Math.max(0, Math.min(1, hearts - i));
+            const breaking = heartBreakIdx != null && i === Math.floor(heartBreakIdx);
+            return (
+              <span key={i} style={{ position: 'relative', width: 18, height: 18, fontSize: 18, display: 'inline-block', animation: breaking ? 'gm-heartbreak .5s ease forwards' : 'none' }}>
+                <span style={{ position: 'absolute', inset: 0 }}>🤍</span>
+                {fill > 0 && <span style={{ position: 'absolute', inset: 0, width: `${fill * 100}%`, overflow: 'hidden' }}>❤️</span>}
+              </span>
+            );
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// 하트 소진 확인 모달: 세션 중 하트를 다 썼을 때 계속할지 묻는다.
+// 계속하면 남은 문제(카드)를 끝까지 풀고, 그만두면 지금까지 결과로 바로 종료한다.
+export function HeartsGate({ onContinue, onStop }: { onContinue: () => void; onStop: () => void }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 40, padding: 16 }}>
+      <div style={{ width: '100%', maxWidth: 340, background: '#fff', borderRadius: 22, padding: '24px 22px', textAlign: 'center' }}>
+        <div style={{ fontSize: 38 }}>💔</div>
+        <div style={{ fontSize: 17, fontWeight: 900, color: '#0f172a', margin: '8px 0 6px' }}>하트를 다 썼어요</div>
+        <div style={{ fontSize: 13, color: '#64748b', fontWeight: 600, lineHeight: 1.6, marginBottom: 18 }}>계속 진행하시겠습니까?<br />남은 문제를 마저 풀 수 있어요.</div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onStop} style={{ flex: 1, background: '#eef2f7', color: '#334155', border: 'none', fontWeight: 900, fontSize: 14, padding: 14, borderRadius: 14, cursor: 'pointer' }}>그만하기</button>
+          <button onClick={onContinue} style={{ flex: 1, background: '#2563eb', color: '#fff', border: 'none', fontWeight: 900, fontSize: 14, padding: 14, borderRadius: 14, cursor: 'pointer' }}>계속하기</button>
+        </div>
+      </div>
     </div>
   );
 }
